@@ -22,7 +22,13 @@ clean_script = base_dir / "KNA_cleantoreport" / "build_kna_clean.py"
 long_script = base_dir / "build_kna_epi_long.py"
 
 if not clean_script.exists() or not long_script.exists():
-    st.error("Required scripts were not found beside this app.")
+    st.error(
+        "Required scripts were not found. "
+        "Make sure Streamlit Cloud **Main file path** is set to `KNA/app.py`.\n\n"
+        f"- `app.py` is at: `{Path(__file__).resolve()}`\n"
+        f"- Looking for clean script: `{clean_script}` — **{'FOUND' if clean_script.exists() else 'MISSING'}**\n"
+        f"- Looking for long script:  `{long_script}` — **{'FOUND' if long_script.exists() else 'MISSING'}**"
+    )
     st.stop()
 
 with st.sidebar:
