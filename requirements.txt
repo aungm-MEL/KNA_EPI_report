@@ -1,0 +1,7 @@
+# KNA Streamlit pipeline dependencies
+# Covers: build_kna_clean.py + build_kna_epi_long.py + app.py
+streamlit==1.57.0
+pandas==3.0.0
+openpyxl==3.1.5
+xlsxwriter==3.2.9
+numpy==2.3.4
