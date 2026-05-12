@@ -18,7 +18,7 @@ st.caption(
 )
 
 base_dir = Path(__file__).resolve().parent
-clean_script = base_dir / "KNA_cleantoreport" / "build_kna_clean.py"
+clean_script = base_dir / "build_kna_clean.py"
 long_script = base_dir / "build_kna_epi_long.py"
 
 if not clean_script.exists() or not long_script.exists():
