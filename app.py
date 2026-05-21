@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import io
+import zipfile
 from pathlib import Path
 
 import streamlit as st
@@ -146,6 +148,22 @@ except Exception as exc:
     st.stop()
 
 st.success("Both outputs are ready.")
+
+zip_buffer = io.BytesIO()
+with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+    zip_file.writestr("KNA_clean.xlsx", clean_bytes)
+    zip_file.writestr("KNA_EPI_long.xlsx", long_bytes)
+zip_buffer.seek(0)
+
+st.download_button(
+    label="Download Both Files (.zip)",
+    data=zip_buffer.getvalue(),
+    file_name="KNA_pipeline_outputs.zip",
+    mime="application/zip",
+    use_container_width=True,
+    type="primary",
+)
+
 dl1, dl2 = st.columns(2)
 with dl1:
     st.download_button(
@@ -154,7 +172,6 @@ with dl1:
         file_name="KNA_clean.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
-        type="primary",
     )
 with dl2:
     st.download_button(
