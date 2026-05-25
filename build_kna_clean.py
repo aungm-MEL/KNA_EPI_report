@@ -14,18 +14,18 @@ Changes applied
 completion_status_2023 differences from quarterly formula
 ---------------------------------------------------------
   Age column         : M1A  (col AI = age when Measles1 was given)
-                       NOT FSD A. The 2023 formula was written for a file where
+                       NOT FSDA. The 2023 formula was written for a file where
                        column AI maps to M1A in the source data.
   Dose-in-year check : 2023-01-01 – 2023-12-21
   MAX boundary       : 2023-12-31  (different from dose-check end)
   1-5 age group      : M1A 12-59 months OR M1A == 111 (special age code)
 ----------------------------------------------------------
-  "U1 Completed in Qx YYYY"  -> FSD A 0-11 months (0 is valid month age)
+  "U1 Completed in Qx YYYY"  -> FSDA 0-11 months (0 is valid month age)
     AND BCG+Pe1-3+OPV1-3+MM1 all given (status 1/2/5)
     AND at least one dose date falls within the quarter AND status 2/5
     AND MAX(Pe3D, OP3D, MM1D) <= quarter end date
 
-  "1-5 Completed in Qx YYYY" -> FSD A 12-59 months
+  "1-5 Completed in Qx YYYY" -> FSDA 12-59 months
     AND Pe1-3+OPV1-3+MM1 all given (status 1/2/5)
     AND at least one dose date falls within the quarter AND status 2/5
     AND MAX(Pe3D, OP3D, MM1D) <= quarter end date
@@ -205,7 +205,7 @@ def full_dose_quarter(
     label: str,
     max_end: pd.Timestamp = None,
     extra_ages_15: frozenset = frozenset(),
-    age_col: str = "FSD A",
+    age_col: str = "FSDA",
 ) -> str:
   """
   Evaluate Full Dose completion for a given period.
@@ -218,7 +218,7 @@ def full_dose_quarter(
                     Defaults to `end` when None.
   extra_ages_15   : additional age values (besides 12-59) that qualify
                     for the 1-5 age group (e.g. frozenset({111})).
-  age_col         : column to use for the age check (default: FSD A).
+  age_col         : column to use for the age check (default: FSDA).
                     Use 'M1A' for formulas written against column AI.
   """
   age = row[age_col]
@@ -234,7 +234,7 @@ def full_dose_quarter(
   max_d    = _max_date(row["Pe3D"], row["OP3D"], row["MM1D"])
   max_ok   = pd.isna(max_d) or max_d <= _max_end
 
-  # Condition 1: U1 (FSD A 0-11 months; 0 is valid month age)
+  # Condition 1: U1 (FSDA 0-11 months; 0 is valid month age)
   if 0 <= age <= 11:
     status_u1 = (
       _status_ok(row["BC_C"]) and _status_ok(row["PE1C"]) and
@@ -256,7 +256,7 @@ def full_dose_quarter(
     if status_u1 and any_period_u1 and max_ok:
       return f"U1 Completed in {label}"
 
-  # Condition 2: 1-5 years (FSD A 12-59 months, or any extra_ages_15 code)
+  # Condition 2: 1-5 years (FSDA 12-59 months, or any extra_ages_15 code)
   elif (11 < age <= 59) or (age in extra_ages_15):
     status_15 = (
       _status_ok(row["PE1C"]) and _status_ok(row["PE2C"]) and
@@ -370,7 +370,7 @@ else:
 
 # ── Validate required columns ──────────────────────────────────────────────────
 required = [
-  "Reg_", "Site", "FSD A",
+  "Reg_", "Site", "FSDA",
   "BCGD", "BC_C",
   "Pe1D", "PE1C", "Pe2D", "PE2C", "Pe3D", "PE3C",
   "OP1D", "OP1C", "OP2D", "OP2C", "OP3D", "OP3C",
@@ -422,7 +422,7 @@ for col_name, q_start, q_end in QUARTERS:
 # -- Add completion_status_2023 ------------------------------------------------
 # Dose-in-year window : 2023-01-01 – 2023-12-21
 # MAX boundary        : 2023-12-31  (different from dose-check end)
-# Extra 1-5 age code  : FSD A == 111
+# Extra 1-5 age code  : FSDA == 111
 print("\nCalculating 'completion_status_2023'...")
 df["completion_status_2023"] = df.apply(
     lambda r: full_dose_quarter(
