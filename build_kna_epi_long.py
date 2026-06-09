@@ -38,7 +38,7 @@ completion_cols_child = [
     'Full Dose in Q1 2026', 'Full Dose in Q2 2026', 'Full Dose in Q3 2026', 'Full Dose in Q4 2026'
 ]
 
-keep_cols_child = ['Twp', 'Reg_', 'Site', 'children_code', 'Sex_', 'DOB_', 'FSD', 'FSD A', 'Resi', 'IDP_', 'completion_status_2023', 'completion_status_2024']
+keep_cols_child = ['Twp', 'Reg_', 'Site', 'children_code', 'Sex_', 'DOB_', 'FSD', 'FSDA', 'Resi', 'IDP_', 'completion_status_2023', 'completion_status_2024']
 
 pattern_mapping = {
     0: 'Not received Yet',
@@ -364,8 +364,8 @@ def build_summary(child_df: pd.DataFrame, td_df: pd.DataFrame) -> pd.DataFrame:
     child_df_all['quarter'] = child_df_all['period'].apply(get_period)
 
     child_df['age_category'] = child_df.apply(lambda r: age_cat_vaccine(r['age_at_dose'], r['vaccine_dose']), axis=1)
-    child_df['age_category_fsd'] = child_df['FSD A'].apply(age_cat_months)
-    child_df_all['age_category_fsd'] = child_df_all['FSD A'].apply(age_cat_months)
+    child_df['age_category_fsd'] = child_df['FSDA'].apply(age_cat_months)
+    child_df_all['age_category_fsd'] = child_df_all['FSDA'].apply(age_cat_months)
 
     # Completion dose counts from completion_status (CD_U1/CD_U5/CD_>5)
     cd_pivot = pd.DataFrame(columns=['quarter', 'Twp', 'Site', 'CD_U1', 'CD_U5', 'CD_>5'])
@@ -504,7 +504,7 @@ def build_yearly_cumulative(child_df: pd.DataFrame, td_df: pd.DataFrame) -> pd.D
     child_df['year'] = child_df['period'].apply(lambda d: pd.to_datetime(d).year if pd.notna(d) else None)
     td_df['year'] = td_df['period'].apply(lambda d: pd.to_datetime(d).year if pd.notna(d) else None)
 
-    child_df['age_category_fsd'] = child_df['FSD A'].apply(age_cat_months)
+    child_df['age_category_fsd'] = child_df['FSDA'].apply(age_cat_months)
 
     # ALOD: unique children_code with receiving_pattern='Provided by KNA' or 'Young age for dose', grouped by year
     alod_filtered = child_df[child_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose'])].copy()
@@ -547,7 +547,7 @@ def build_cumulative(child_df: pd.DataFrame, td_df: pd.DataFrame) -> pd.DataFram
     child_df = child_df.copy()
     td_df = td_df.copy()
 
-    child_df['age_category_fsd'] = child_df['FSD A'].apply(age_cat_months)
+    child_df['age_category_fsd'] = child_df['FSDA'].apply(age_cat_months)
 
     # ALOD: unique children_code with receiving_pattern='Provided by KNA' or 'Young age for dose', overall (no time disaggregation)
     alod_filtered = child_df[child_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose'])].copy()
@@ -782,7 +782,7 @@ def calculate_indicators(child_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
     
     # Calculate "At least one dose under 5-yr-old" indicator — per year
     print("  Processing At least one dose under 5-yr-old indicator")
-    if 'FSD A' in child_df.columns and 'receiving_pattern' in child_df.columns:
+    if 'FSDA' in child_df.columns and 'receiving_pattern' in child_df.columns:
         for year in years:
             data_year_dose = child_df[
                 (child_df['quarter'].astype(str).str.endswith(year, na=False)) &
@@ -791,7 +791,7 @@ def calculate_indicators(child_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
             print(f"    {year} ALOD-eligible records: {len(data_year_dose)}")
 
             # Use the same age-bucketing logic as Summary ALOD
-            data_year_dose['age_cat'] = data_year_dose['FSD A'].apply(age_cat_months)
+            data_year_dose['age_cat'] = data_year_dose['FSDA'].apply(age_cat_months)
             valid_dose = data_year_dose[data_year_dose['age_cat'].isin(['U1', 'U5'])].copy()
 
             if len(valid_dose) == 0:
@@ -986,7 +986,7 @@ def build_alod_cummu_sheet(child_df: pd.DataFrame, template_df: pd.DataFrame) ->
         child_df['quarter'] = child_df['period'].apply(get_period)
     
     child_df['year_from_quarter'] = child_df['quarter'].str[-4:]
-    child_df['age_cat'] = child_df['FSD A'].apply(age_cat_months)
+    child_df['age_cat'] = child_df['FSDA'].apply(age_cat_months)
 
     child_df = child_df[child_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose'])]
 
