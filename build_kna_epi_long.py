@@ -745,4 +745,566 @@ def calculate_indicators(child_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
             # Find the row for this year
             full_dose_idx = indicators_df[
                 (indicators_df['_indicator_norm'] == 'Full dose under 5-yr-old')
-         
+                & (indicators_df['_period_norm'] == int(year))
+            ].index
+            if len(full_dose_idx) == 0:
+                continue
+            idx = full_dose_idx[0]
+
+            for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+                for age_cat, col_suffix in [('U1', 'U1'), ('1-5', '1-5')]:
+                    subset = valid[(valid['completion_quarter'] == q) & (valid['age_cat'] == age_cat)].copy()
+
+                    if col_suffix == '1-5':
+                        male_col = f'{q} {col_suffix} Male '
+                        female_col = f'{q} {col_suffix} Female'
+                    else:
+                        male_col = f'{q} {col_suffix} Male'
+                        female_col = f'{q} {col_suffix} Female'
+
+                    if len(subset) > 0:
+                        subset['_sex_norm'] = subset['Sex_'].apply(_sex_bucket)
+                        sex_counts = subset.groupby('_sex_norm')['children_code'].nunique()
+                        resolved_male = _resolve_column_name(indicators_df, male_col)
+                        resolved_female = _resolve_column_name(indicators_df, female_col)
+                        if resolved_male:
+                            indicators_df.loc[idx, resolved_male] = int(sex_counts.get('Male', 0))
+                        if resolved_female:
+                            indicators_df.loc[idx, resolved_female] = int(sex_counts.get('Female', 0))
+                    else:
+                        resolved_male = _resolve_column_name(indicators_df, male_col)
+                        resolved_female = _resolve_column_name(indicators_df, female_col)
+                        if resolved_male:
+                            indicators_df.loc[idx, resolved_male] = 0
+                        if resolved_female:
+                            indicators_df.loc[idx, resolved_female] = 0
+            print(f"    {year} Full dose indicator updated")
+    
+    # Calculate "At least one dose under 5-yr-old" indicator — per year
+    print("  Processing At least one dose under 5-yr-old indicator")
+    if 'FSD A' in child_df.columns and 'receiving_pattern' in child_df.columns:
+        for year in years:
+            data_year_dose = child_df[
+                (child_df['quarter'].astype(str).str.endswith(year, na=False)) &
+                (child_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose']))
+            ].copy()
+            print(f"    {year} ALOD-eligible records: {len(data_year_dose)}")
+
+            # Use the same age-bucketing logic as Summary ALOD
+            data_year_dose['age_cat'] = data_year_dose['FSD A'].apply(age_cat_months)
+            valid_dose = data_year_dose[data_year_dose['age_cat'].isin(['U1', 'U5'])].copy()
+
+            if len(valid_dose) == 0:
+                continue
+
+            # Find the row for this year
+            at_least_one_idx = indicators_df[
+                (indicators_df['_indicator_norm'] == 'At least one dose under 5-yr-old')
+                & (indicators_df['_period_norm'] == int(year))
+            ].index
+            if len(at_least_one_idx) == 0:
+                continue
+            idx = at_least_one_idx[0]
+
+            for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+                for age_cat, col_suffix in [('U1', 'U1'), ('U5', '1-5')]:
+                    subset = valid_dose[(valid_dose['quarter'].astype(str).str.startswith(q)) & (valid_dose['age_cat'] == age_cat)].copy()
+
+                    if col_suffix == '1-5':
+                        male_col = f'{q} {col_suffix} Male '
+                        female_col = f'{q} {col_suffix} Female'
+                    else:
+                        male_col = f'{q} {col_suffix} Male'
+                        female_col = f'{q} {col_suffix} Female'
+
+                    if len(subset) > 0:
+                        subset['_sex_norm'] = subset['Sex_'].apply(_sex_bucket)
+                        sex_counts = subset.groupby('_sex_norm')['children_code'].nunique()
+                        resolved_male = _resolve_column_name(indicators_df, male_col)
+                        resolved_female = _resolve_column_name(indicators_df, female_col)
+                        if resolved_male:
+                            indicators_df.loc[idx, resolved_male] = int(sex_counts.get('Male', 0))
+                        if resolved_female:
+                            indicators_df.loc[idx, resolved_female] = int(sex_counts.get('Female', 0))
+                    else:
+                        resolved_male = _resolve_column_name(indicators_df, male_col)
+                        resolved_female = _resolve_column_name(indicators_df, female_col)
+                        if resolved_male:
+                            indicators_df.loc[idx, resolved_male] = 0
+                        if resolved_female:
+                            indicators_df.loc[idx, resolved_female] = 0
+            print(f"    {year} At least one dose indicator updated")
+    else:
+        print(f"    Missing required columns for at least one dose calculation")
+    
+    indicators_df = indicators_df.drop(columns=['_indicator_norm', '_period_norm'], errors='ignore')
+    return indicators_df
+
+
+def calculate_td_indicators(td_df: pd.DataFrame, indicators_df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate Td indicators from Td sheet and update indicators (per year rows)"""
+    td_df = td_df.copy()
+    indicators_df = indicators_df.copy()
+    
+    # Add quarter column
+    td_df['quarter'] = td_df['period'].apply(get_period)
+
+    # Use years from indicator template rows to keep a stable 3-year output window
+    td_template_rows = indicators_df[indicators_df['indicator'].astype(str).str.strip().isin(['Td ALOD', 'Td Two Doses'])]
+    years = extract_years_from_template(td_template_rows if not td_template_rows.empty else indicators_df, fallback=['2024', '2025', '2026'])
+
+    print(f"  Years found for Td indicators: {years}")
+    
+    # Calculate "Td ALOD" (At Least One Dose) - TD1 or TD2 — per year
+    alod_data = td_df[(td_df['vaccine_dose'].isin(['TD1', 'TD2'])) & (td_df['receiving_pattern'] == 'Provided by KNA')].copy()
+    print(f"    Td ALOD records across all years: {len(alod_data)}")
+
+    if len(alod_data) > 0:
+        for year in years:
+            td_alod_idx = indicators_df[(indicators_df['indicator'].str.strip() == 'Td ALOD') & (indicators_df['Period'] == int(year))].index
+            if len(td_alod_idx) == 0:
+                continue
+            idx = td_alod_idx[0]
+
+            # Filter for this year
+            alod_year = alod_data[alod_data['quarter'].astype(str).str.endswith(year, na=False)].copy()
+            
+            # Fill columns for each quarter
+            for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+                mask = alod_year['quarter'].astype(str).str.startswith(q)
+                subset = alod_year[mask]
+                cnt = int(subset['pw_code'].nunique()) if len(subset) else 0
+
+                # Td indicators should update only the 1-5 Female column.
+                # Keep 1-5 Male untouched in the indicators template/output.
+                female_col_1_5 = f'{q} 1-5 Female'
+
+                resolved_female = _resolve_column_name(indicators_df, female_col_1_5)
+                if resolved_female:
+                    indicators_df.loc[idx, resolved_female] = cnt
+
+            print(f"    {year} Td ALOD indicator updated")
+    else:
+        print(f"    No Td ALOD records found")
+
+    # Calculate "Td Two Doses" - TD2 only — per year
+    td2_data = td_df[(td_df['vaccine_dose'] == 'TD2') & (td_df['receiving_pattern'] == 'Provided by KNA')].copy()
+    print(f"    Td Two Doses records across all years: {len(td2_data)}")
+    if len(td2_data) > 0:
+        for year in years:
+            td_two_idx = indicators_df[(indicators_df['indicator'].str.strip() == 'Td Two Doses') & (indicators_df['Period'] == int(year))].index
+            if len(td_two_idx) == 0:
+                continue
+            idx = td_two_idx[0]
+
+            # Filter for this year
+            td2_year = td2_data[td2_data['quarter'].astype(str).str.endswith(year, na=False)].copy()
+
+            # Fill columns for each quarter
+            for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+                mask = td2_year['quarter'].astype(str).str.startswith(q)
+                subset = td2_year[mask]
+                cnt = int(subset['pw_code'].nunique()) if len(subset) else 0
+
+                # Td indicators should update only the 1-5 Female column.
+                # Keep 1-5 Male untouched in the indicators template/output.
+                female_col_1_5 = f'{q} 1-5 Female'
+
+                resolved_female = _resolve_column_name(indicators_df, female_col_1_5)
+                if resolved_female:
+                    indicators_df.loc[idx, resolved_female] = cnt
+
+            print(f"    {year} Td Two Doses indicator updated")
+    else:
+        print(f"    No Td Two Doses records found")
+    
+    return indicators_df
+
+
+def build_td_alod_sheet(td_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.DataFrame:
+    """Build Td ALOD annual sheet using template structure."""
+    # Build per-year rows using the template structure. If template has multiple rows (one per year),
+    # fill them in order; otherwise replicate the first template row for each year.
+    td_df = td_df.copy()
+    td_df['quarter'] = td_df['period'].apply(get_period)
+
+    years = extract_years_from_template(template_df, fallback=['2024', '2025', '2026'])
+
+    rows = []
+    for idx, year in enumerate(years):
+        if idx < len(template_df):
+            base = template_df.iloc[idx].to_dict()
+        else:
+            base = template_df.iloc[0].to_dict() if len(template_df) > 0 else {}
+
+        # Filter for this year and Provided by KNA and any Td1/TD2 doses
+        alod_data = td_df[
+            (td_df['quarter'].str.endswith(year, na=False)) &
+            (td_df['receiving_pattern'] == 'Provided by KNA') &
+            (td_df['vaccine_dose'].isin(['TD1', 'TD2']))
+        ].copy()
+
+        total_unique = int(alod_data['pw_code'].nunique()) if len(alod_data) else 0
+
+        row = dict(base)
+        # Set common keys if present
+        if 'Annual Achievement' in row:
+            row['Annual Achievement'] = total_unique
+        else:
+            # try alternative column names
+            for alt in ['Annual', 'Achievement', 'Annual Achv']:
+                if alt in row:
+                    row[alt] = total_unique
+                    break
+
+        # Set period/Period column if present
+        period_col = 'Period' if 'Period' in row else ('period' if 'period' in row else None)
+        if period_col:
+            row[period_col] = year
+
+        print(f"  Td ALOD {year} annual achievement: {total_unique}")
+        rows.append(row)
+
+    out_df = pd.DataFrame(rows)
+
+    # Ensure column order follows template
+    if len(template_df) > 0:
+        cols_to_keep = [c for c in template_df.columns if c in out_df.columns]
+        # append any extra cols
+        cols_to_keep += [c for c in out_df.columns if c not in cols_to_keep]
+        out_df = out_df[cols_to_keep]
+
+    return out_df
+
+
+def build_alod_cummu_sheet(child_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.DataFrame:
+    """Build ALOD cumulative annual sheet for 2024, 2025, 2026 using template structure."""
+    child_df = child_df.copy()
+    
+    # Use existing quarter column if available, otherwise create it
+    if 'quarter' not in child_df.columns:
+        child_df['quarter'] = child_df['period'].apply(get_period)
+    
+    child_df['year_from_quarter'] = child_df['quarter'].str[-4:]
+    child_df['age_cat'] = child_df['FSD A'].apply(age_cat_months)
+
+    child_df = child_df[child_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose'])]
+
+    rows = []
+    for idx, year in enumerate(['2024', '2025', '2026']):
+        # Use corresponding template row for each year if available
+        if idx < len(template_df):
+            base = template_df.iloc[idx].to_dict()
+        else:
+            base = template_df.iloc[0].to_dict()
+        
+        year_data = child_df[child_df['year_from_quarter'] == year].copy()
+
+        row = dict(base)
+        row.setdefault('Annual U1 Male', 0)
+        row.setdefault('Annaul U1 Female', 0)
+        row.setdefault('Annual 1-5 Male', 0)
+        row.setdefault('Annual 1-5 Female', 0)
+
+        if len(year_data) > 0:
+            year_data['_sex_norm'] = year_data['Sex_'].apply(_sex_bucket)
+            year_data = year_data[year_data['_sex_norm'].notna()]
+            agg = year_data.groupby(['_sex_norm', 'age_cat'])['children_code'].nunique().reset_index(name='count')
+            for _, r in agg.iterrows():
+                sex = r['_sex_norm']
+                age = r['age_cat']
+                cnt = r['count']
+                if sex == 'Male':
+                    if age == 'U1':
+                        row['Annual U1 Male'] = cnt
+                    elif age == 'U5':
+                        row['Annual 1-5 Male'] = cnt
+                elif sex == 'Female':
+                    if age == 'U1':
+                        row['Annaul U1 Female'] = cnt
+                    elif age == 'U5':
+                        row['Annual 1-5 Female'] = cnt
+
+            total = agg['count'].sum()
+            print(f"  ALOD cummu {year} annual achievement: {total} (by sex/age)")
+        else:
+            print(f"  No {year} 'Provided by KNA' child records found for ALOD cummu")
+
+        # Update period column - use the column name from template if exists, else use lowercase
+        period_col = 'Period' if 'Period' in base else 'period'
+        row[period_col] = year
+        rows.append(row)
+
+    # Create dataframe using template column order
+    out_df = pd.DataFrame(rows)
+    
+    # Reorder columns to match template (and exclude any duplicate period columns)
+    cols_to_keep = []
+    for col in template_df.columns:
+        if col in out_df.columns:
+            cols_to_keep.append(col)
+    
+    out_df = out_df[cols_to_keep]
+    return out_df
+
+
+def build_td2_indicator_sheet(td_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.DataFrame:
+    """Build annual Td2 indicator rows using template structure."""
+    td_df = td_df.copy()
+    td_df['quarter'] = td_df['period'].apply(get_period)
+
+    years = extract_years_from_template(template_df, fallback=['2024', '2025', '2026'])
+
+    rows = []
+    for idx, year in enumerate(years):
+        if idx < len(template_df):
+            base = template_df.iloc[idx].to_dict()
+        else:
+            base = template_df.iloc[0].to_dict() if len(template_df) > 0 else {}
+
+        subset = td_df[
+            (td_df['quarter'].str.endswith(year, na=False))
+            & (td_df['vaccine_dose'] == 'TD2')
+            & (td_df['receiving_pattern'] == 'Provided by KNA')
+        ]
+        total_count = int(subset['pw_code'].nunique()) if len(subset) else 0
+
+        # Quarterly breakdown
+        q_counts = {}
+        for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+            mask = subset['quarter'].astype(str).str.contains(f"{q}[_-]?{year}", na=False)
+            qdf = subset[mask]
+            q_counts[q] = int(qdf['pw_code'].nunique()) if len(qdf) else 0
+
+        row = dict(base)
+        # Prefer explicit quarterly achievement columns if present, otherwise add base names
+        for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+            ach_base = f'{q} Achievement'
+            ach_year = f'{q}_{year} Achievement'
+            if ach_base in row:
+                row[ach_base] = q_counts[q]
+            elif ach_year in row:
+                row[ach_year] = q_counts[q]
+            else:
+                # ensure the column exists even if template missing it
+                row[ach_base] = q_counts[q]
+
+        # Also set annual/total if template expects it
+        if 'Annual Achievement' in row:
+            row['Annual Achievement'] = total_count
+        else:
+            for alt in ['Annual', 'Achievement', 'Annual Achv']:
+                if alt in row:
+                    row[alt] = total_count
+                    break
+
+        period_col = 'Period' if 'Period' in row else ('period' if 'period' in row else None)
+        if period_col:
+            row[period_col] = year
+
+        print(f"  Td2 {year} annual achievement: {total_count}")
+        rows.append(row)
+
+    out_df = pd.DataFrame(rows)
+    if len(template_df) > 0:
+        cols_to_keep = [c for c in template_df.columns if c in out_df.columns]
+        cols_to_keep += [c for c in out_df.columns if c not in cols_to_keep]
+        out_df = out_df[cols_to_keep]
+
+    return out_df
+
+
+def build_idp_sheet(child_long_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build IDP sheet with unique count of children_code
+    Filters:
+    - vaccine_dose = 'Penta1'
+    - receiving_pattern = 'Provided by KNA'
+    - age_at_dose between 2-59 (inclusive)
+    Disaggregated by:
+    - IDP_ (True/False)
+    - Sex_ (မ = Female, ကျား = Male)
+    - period (quarterly: Q1_2025, Q2_2025, Q3_2025, Q4_2025)
+    """
+    print("Building IDP sheet...")
+    
+    # Filter data
+    filtered = child_long_df[
+        (child_long_df['vaccine_dose'] == 'Penta1') &
+        (child_long_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose'])) &
+        (child_long_df['age_at_dose'] >= 2) &
+        (child_long_df['age_at_dose'] <= 59)
+    ].copy()
+    
+    print(f"  IDP filtered records: {len(filtered)}")
+    
+    # Map period to quarterly format using get_period function
+    filtered['quarter'] = filtered['period'].apply(get_period)
+    
+    # Remove records without valid quarter
+    filtered = filtered[filtered['quarter'].notna()]
+    print(f"  Records with valid quarters: {len(filtered)}")
+
+    # Normalize grouping keys for robust matching across encodings/types.
+    filtered['_sex_norm'] = filtered['Sex_'].apply(_sex_bucket)
+    filtered['_idp_norm'] = filtered['IDP_'].fillna(False).astype(bool)
+    
+    # Group by IDP_, Sex_, and quarter and produce per-year rows (years found in data or default set)
+    filtered['quarter'] = filtered['quarter'].astype(str)
+
+    years = extract_years_from_template(template_df, fallback=['2024', '2025', '2026'])
+
+    out_rows = []
+    # Use template rows as base for each year (by index) if available
+    for idx, year in enumerate(years):
+        if idx < len(template_df):
+            template_row = template_df.iloc[idx].to_dict()
+        else:
+            template_row = template_df.iloc[0].to_dict() if len(template_df) > 0 else {}
+
+        row = {
+            'Period': int(year),
+            'Organization': template_row.get('Organization', 'KNA'),
+            'Project Name': template_row.get('Project Name', 'REACH_KK'),
+            'indicator': 'Penta1 under 5-yr-old'
+        }
+
+        # Compute counts per quarter for this year
+        for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+            quarter_key = f'{q}_{year}'
+            quarter_data = filtered[filtered['quarter'] == quarter_key]
+
+            idp_male = quarter_data[(quarter_data['_idp_norm']) & (quarter_data['_sex_norm'] == 'Male')]['children_code'].nunique()
+            idp_female = quarter_data[(quarter_data['_idp_norm']) & (quarter_data['_sex_norm'] == 'Female')]['children_code'].nunique()
+            non_idp_male = quarter_data[(~quarter_data['_idp_norm']) & (quarter_data['_sex_norm'] == 'Male')]['children_code'].nunique()
+            non_idp_female = quarter_data[(~quarter_data['_idp_norm']) & (quarter_data['_sex_norm'] == 'Female')]['children_code'].nunique()
+
+            row[f'{q} IDP Male'] = int(idp_male) if idp_male > 0 else None
+            row[f'{q} IDP Female'] = int(idp_female) if idp_female > 0 else None
+            row[f'{q} non-IDP Male'] = int(non_idp_male) if non_idp_male > 0 else None
+            row[f'{q} non-IDP Female'] = int(non_idp_female) if non_idp_female > 0 else None
+
+            print(f"  {quarter_key}: IDP Male={idp_male}, IDP Female={idp_female}, non-IDP Male={non_idp_male}, non-IDP Female={non_idp_female}")
+
+        out_rows.append(row)
+
+    out_df = pd.DataFrame(out_rows)
+
+    # Ensure all template columns exist and order
+    for col in template_df.columns:
+        if col not in out_df.columns:
+            out_df[col] = None
+
+    out_df = out_df[template_df.columns]
+
+    return out_df
+
+
+def main():
+    print(f"Reading {input_path} ...")
+    child_raw = pd.read_excel(input_path, sheet_name='Child')
+    td_raw = pd.read_excel(input_path, sheet_name='Td')
+    indicators_2025 = pd.read_excel(input_path, sheet_name='2025_indicators')
+    td_alod_template = pd.read_excel(input_path, sheet_name='Td_alod')
+    alod_cummu_template = pd.read_excel(input_path, sheet_name='ALOD_cummu')
+    idp_template = pd.read_excel(input_path, sheet_name='IDP')
+    # Td2 indicator template (optional)
+    try:
+        td2_template = pd.read_excel(input_path, sheet_name='Td2_indicator')
+    except Exception:
+        td2_template = pd.DataFrame()
+
+    print("Building child long...")
+    child_long = build_child_long(child_raw)
+    print(f"  child: {len(child_long)} rows")
+    
+    print("Building td long...")
+    td_long = build_td_long(td_raw)
+    print(f"  td: {len(td_long)} rows")
+    
+    print("Building summary...")
+    summary_df = build_summary(child_long, td_long)
+    print(f"  summary: {len(summary_df)} rows")
+    
+    print("Building yearly cumulative...")
+    yearly_cumulative_df = build_yearly_cumulative(child_long, td_long)
+    print(f"  yearly_cumulative: {len(yearly_cumulative_df)} rows")
+    
+    print("Building cumulative...")
+    cumulative_df = build_cumulative(child_long, td_long)
+    print(f"  cumulative: {len(cumulative_df)} rows")
+    
+    print("Calculating indicators...")
+    indicators_2025 = calculate_indicators(child_long, indicators_2025)
+    indicators_2025 = calculate_td_indicators(td_long, indicators_2025)
+    print(f"  indicators updated")
+
+    print("Building Td_alod sheet...")
+    td_alod_df = build_td_alod_sheet(td_long, td_alod_template)
+    print(f"  Td_alod: {len(td_alod_df)} rows")
+
+    print("Building ALOD_cummu sheet...")
+    alod_cummu_df = build_alod_cummu_sheet(child_long, alod_cummu_template)
+    print(f"  ALOD_cummu: {len(alod_cummu_df)} rows")
+
+    print("Building IDP sheet...")
+    idp_df = build_idp_sheet(child_long, idp_template)
+    print(f"  IDP: {len(idp_df)} rows")
+
+    print("Building Td2_indicator sheet...")
+    td2_df = build_td2_indicator_sheet(td_long, td2_template)
+    print(f"  Td2_indicator: {len(td2_df)} rows")
+
+    print(f"Writing combined file to {output_path} ...")
+    try:
+        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+            if INCLUDE_LONG_SHEETS_IN_OUTPUT:
+                print("Writing child sheet...")
+                child_long.to_excel(writer, sheet_name='child', index=False)
+                print("  done")
+
+                print("Writing Td sheet...")
+                td_long.to_excel(writer, sheet_name='Td', index=False)
+                print("  done")
+            else:
+                print("Skipping child/Td long sheets for compact output")
+            
+            print("Writing Summary sheet...")
+            summary_df.to_excel(writer, sheet_name='Summary', index=False)
+            print("  done")
+            
+            print("Writing yearly_cumulative sheet...")
+            yearly_cumulative_df.to_excel(writer, sheet_name='yearly_cumulative', index=False)
+            print("  done")
+            
+            print("Writing cumulative sheet...")
+            cumulative_df.to_excel(writer, sheet_name='cumulative', index=False)
+            print("  done")
+            
+            print("Writing indicators sheet...")
+            indicators_2025.to_excel(writer, sheet_name='indicators', index=False)
+            print("  done")
+
+            print("Writing Td_alod sheet...")
+            td_alod_df.to_excel(writer, sheet_name='Td_alod', index=False)
+            print("  done")
+
+            print("Writing ALOD_cummu sheet...")
+            alod_cummu_df.to_excel(writer, sheet_name='ALOD_cummu', index=False)
+            print("  done")
+
+            print("Writing IDP sheet...")
+            idp_df.to_excel(writer, sheet_name='IDP', index=False)
+            print("  done")
+            print("Writing Td2_indicator sheet...")
+            td2_df.to_excel(writer, sheet_name='Td2_indicator', index=False)
+            print("  done")
+        print("File write completed successfully")
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == '__main__':
+    main()
