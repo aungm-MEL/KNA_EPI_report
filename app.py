@@ -20,16 +20,39 @@ st.caption(
 )
 
 base_dir = Path(__file__).resolve().parent
-clean_script = base_dir / "build_kna_clean.py"
+clean_script_candidates = [
+    base_dir / "KNA_cleantoreport" / "build_kna_clean.py",
+    base_dir / "build_kna_clean.py",
+]
+clean_script = next((p for p in clean_script_candidates if p.exists()), clean_script_candidates[0])
 long_script = base_dir / "build_kna_epi_long.py"
 
+
+def _script_looks_like_streamlit(script_path: Path) -> bool:
+    try:
+        text = script_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return "import streamlit as st" in text or "st.set_page_config(" in text
+
 if not clean_script.exists() or not long_script.exists():
+    clean_locations = "\n".join(f"- `{p}`" for p in clean_script_candidates)
     st.error(
         "Required scripts were not found. "
         "Make sure Streamlit Cloud **Main file path** is set to `KNA/app.py`.\n\n"
         f"- `app.py` is at: `{Path(__file__).resolve()}`\n"
-        f"- Looking for clean script: `{clean_script}` — **{'FOUND' if clean_script.exists() else 'MISSING'}**\n"
+        f"- Clean script search paths:\n{clean_locations}\n"
+        f"- Selected clean script: `{clean_script}` — **{'FOUND' if clean_script.exists() else 'MISSING'}**\n"
         f"- Looking for long script:  `{long_script}` — **{'FOUND' if long_script.exists() else 'MISSING'}**"
+    )
+    st.stop()
+
+if _script_looks_like_streamlit(clean_script):
+    st.error(
+        "Selected clean pipeline script appears to be a Streamlit UI file, not build logic.\n\n"
+        f"- Selected path: `{clean_script}`\n"
+        "- Expected: a data-processing script (pandas/openpyxl), not one containing `import streamlit as st`.\n"
+        "Please verify your repository files and keep the clean script at `KNA_cleantoreport/build_kna_clean.py`."
     )
     st.stop()
 
@@ -84,7 +107,19 @@ def run_step(cmd, cwd: Path, step_name: str, extra_env=None):
         for line in res.stderr.splitlines():
             push_log(f"  [stderr] {line}")
     if res.returncode != 0:
-        raise RuntimeError(f"{step_name} failed with exit code {res.returncode}")
+        stderr_tail = ""
+        stdout_tail = ""
+        if res.stderr:
+            stderr_lines = [line for line in res.stderr.splitlines() if line.strip()]
+            stderr_tail = " | ".join(stderr_lines[-3:])
+        if res.stdout:
+            stdout_lines = [line for line in res.stdout.splitlines() if line.strip()]
+            stdout_tail = " | ".join(stdout_lines[-3:])
+
+        detail = stderr_tail or stdout_tail or "No stderr/stdout captured"
+        raise RuntimeError(
+            f"{step_name} failed with exit code {res.returncode}. Details: {detail}"
+        )
 
 
 clean_bytes = None
