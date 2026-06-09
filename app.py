@@ -23,9 +23,14 @@ base_dir = Path(__file__).resolve().parent
 clean_script_candidates = [
     base_dir / "KNA_cleantoreport" / "build_kna_clean.py",
     base_dir / "build_kna_clean.py",
+    base_dir / "KNA" / "KNA_cleantoreport" / "build_kna_clean.py",
+    base_dir.parent / "KNA_cleantoreport" / "build_kna_clean.py",
 ]
-clean_script = next((p for p in clean_script_candidates if p.exists()), clean_script_candidates[0])
-long_script = base_dir / "build_kna_epi_long.py"
+long_script_candidates = [
+    base_dir / "build_kna_epi_long.py",
+    base_dir / "KNA" / "build_kna_epi_long.py",
+    base_dir.parent / "build_kna_epi_long.py",
+]
 
 
 def _script_looks_like_streamlit(script_path: Path) -> bool:
@@ -35,22 +40,40 @@ def _script_looks_like_streamlit(script_path: Path) -> bool:
         return False
     return "import streamlit as st" in text or "st.set_page_config(" in text
 
+
+def _select_pipeline_script(candidates):
+    existing = [p for p in candidates if p.exists()]
+    if not existing:
+        return candidates[0], existing
+
+    # Prefer actual pipeline scripts over accidental Streamlit UI files.
+    non_ui = [p for p in existing if not _script_looks_like_streamlit(p)]
+    return (non_ui[0] if non_ui else existing[0]), existing
+
+
+clean_script, clean_existing = _select_pipeline_script(clean_script_candidates)
+long_script, long_existing = _select_pipeline_script(long_script_candidates)
+
 if not clean_script.exists() or not long_script.exists():
     clean_locations = "\n".join(f"- `{p}`" for p in clean_script_candidates)
+    long_locations = "\n".join(f"- `{p}`" for p in long_script_candidates)
     st.error(
         "Required scripts were not found. "
         "Make sure Streamlit Cloud **Main file path** is set to `KNA/app.py`.\n\n"
         f"- `app.py` is at: `{Path(__file__).resolve()}`\n"
         f"- Clean script search paths:\n{clean_locations}\n"
         f"- Selected clean script: `{clean_script}` — **{'FOUND' if clean_script.exists() else 'MISSING'}**\n"
-        f"- Looking for long script:  `{long_script}` — **{'FOUND' if long_script.exists() else 'MISSING'}**"
+        f"- Long script search paths:\n{long_locations}\n"
+        f"- Selected long script: `{long_script}` — **{'FOUND' if long_script.exists() else 'MISSING'}**"
     )
     st.stop()
 
 if _script_looks_like_streamlit(clean_script):
+    clean_found = "\n".join(f"- `{p}`" for p in clean_existing) or "- none"
     st.error(
         "Selected clean pipeline script appears to be a Streamlit UI file, not build logic.\n\n"
         f"- Selected path: `{clean_script}`\n"
+        f"- Existing clean script candidates:\n{clean_found}\n"
         "- Expected: a data-processing script (pandas/openpyxl), not one containing `import streamlit as st`.\n"
         "Please verify your repository files and keep the clean script at `KNA_cleantoreport/build_kna_clean.py`."
     )
