@@ -78,6 +78,49 @@ def _resolve_column_name(df: pd.DataFrame, expected: str):
     return None
 
 
+def _ensure_indicator_total_columns(indicators_df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure Q1-Q4 Total columns exist and are placed after each 1-5 Female column."""
+    indicators_df = indicators_df.copy()
+    for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+        total_col = f'{q} Total'
+        if _resolve_column_name(indicators_df, total_col):
+            continue
+
+        female_col = _resolve_column_name(indicators_df, f'{q} 1-5 Female')
+        indicators_df[total_col] = 0
+        if female_col:
+            cols = list(indicators_df.columns)
+            cols.remove(total_col)
+            insert_at = cols.index(female_col) + 1
+            cols.insert(insert_at, total_col)
+            indicators_df = indicators_df[cols]
+    return indicators_df
+
+
+def _update_indicator_quarter_totals(indicators_df: pd.DataFrame) -> pd.DataFrame:
+    """Recalculate Q1-Q4 Total as sum of U1 and 1-5 Male/Female columns for each quarter."""
+    indicators_df = indicators_df.copy()
+    for q in ['Q1', 'Q2', 'Q3', 'Q4']:
+        total_col = _resolve_column_name(indicators_df, f'{q} Total')
+        if not total_col:
+            continue
+
+        parts = []
+        for base in ['U1 Male', 'U1 Female', '1-5 Male', '1-5 Female']:
+            col = _resolve_column_name(indicators_df, f'{q} {base}')
+            if col:
+                parts.append(pd.to_numeric(indicators_df[col], errors='coerce').fillna(0))
+
+        if parts:
+            quarter_total = parts[0]
+            for s in parts[1:]:
+                quarter_total = quarter_total + s
+            indicators_df[total_col] = quarter_total.astype(int)
+        else:
+            indicators_df[total_col] = 0
+    return indicators_df
+
+
 def _sex_bucket(val):
     """Normalize sex labels from mixed encodings/languages to Male/Female."""
     if pd.isna(val):
@@ -593,6 +636,8 @@ def calculate_indicators(child_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
     if 'Period' not in indicators_df.columns:
         indicators_df['Period'] = 2025
 
+    indicators_df = _ensure_indicator_total_columns(indicators_df)
+
     # Normalize matching keys once to avoid whitespace/type mismatches from templates.
     indicators_df['_indicator_norm'] = indicators_df['indicator'].astype(str).str.strip()
     indicators_df['_period_norm'] = pd.to_numeric(indicators_df['Period'], errors='coerce').astype('Int64')
@@ -837,6 +882,7 @@ def calculate_indicators(child_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
     else:
         print(f"    Missing required columns for at least one dose calculation")
     
+    indicators_df = _update_indicator_quarter_totals(indicators_df)
     indicators_df = indicators_df.drop(columns=['_indicator_norm', '_period_norm'], errors='ignore')
     return indicators_df
 
@@ -918,6 +964,8 @@ def calculate_td_indicators(td_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
     else:
         print(f"    No Td Two Doses records found")
     
+    indicators_df = _ensure_indicator_total_columns(indicators_df)
+    indicators_df = _update_indicator_quarter_totals(indicators_df)
     return indicators_df
 
 
