@@ -1285,6 +1285,7 @@ def main():
     print("Calculating indicators...")
     indicators_2025 = calculate_indicators(child_long, indicators_2025)
     indicators_2025 = calculate_td_indicators(td_long, indicators_2025)
+    indicators_2025 = indicators_2025.rename(columns={'Period': 'Year'})
     print(f"  indicators updated")
 
     print("Building Td_alod sheet...")
