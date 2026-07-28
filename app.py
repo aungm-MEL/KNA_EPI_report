@@ -97,31 +97,19 @@ if not st.button("▶ Run Full Pipeline", type="primary", use_container_width=Tr
     st.stop()
 
 progress = st.progress(0, text="Starting pipeline...")
-log_box = st.empty()
-logs = []
+run_logs = []
 
 
 def push_log(msg: str):
-    logs.append(msg)
-    log_box.code("\n".join(logs[-160:]), language="")
+    run_logs.append(msg)
 
 
 def run_step(cmd, cwd: Path, step_name: str, extra_env=None):
     push_log(f"Running: {step_name}")
-    push_log(f"  cwd={cwd}")
-    push_log(f"  cmd={' '.join(str(c) for c in cmd)}")
     env = dict(os.environ)
     if extra_env:
         env.update({k: str(v) for k, v in extra_env.items()})
-        for k, v in extra_env.items():
-            push_log(f"  env {k}={v}")
     res = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, env=env)
-    if res.stdout:
-        for line in res.stdout.splitlines():
-            push_log(f"  {line}")
-    if res.stderr:
-        for line in res.stderr.splitlines():
-            push_log(f"  [stderr] {line}")
     if res.returncode != 0:
         stderr_tail = ""
         stdout_tail = ""
@@ -136,6 +124,7 @@ def run_step(cmd, cwd: Path, step_name: str, extra_env=None):
         raise RuntimeError(
             f"{step_name} failed with exit code {res.returncode}. Details: {detail}"
         )
+    push_log(f"Completed: {step_name}")
 
 
 def show_verification_report(report: dict):
@@ -181,6 +170,7 @@ try:
         tmp_clean_dir.mkdir(parents=True, exist_ok=True)
 
         progress.progress(8, text="Preparing temporary workspace...")
+        push_log("Prepared temporary workspace")
 
         shutil.copy2(long_script, tmp_kna / "build_kna_epi_long.py")
         shutil.copy2(clean_script, tmp_clean_dir / "build_kna_clean.py")
@@ -208,8 +198,9 @@ try:
 
         if verify_out.exists():
             verification_report = json.loads(verify_out.read_text(encoding="utf-8"))
+            push_log("Loaded verification report")
         else:
-            push_log("[warning] Verification report file was not produced by build_kna_clean.py")
+            push_log("Warning: verification report file was not produced by build_kna_clean.py")
 
         # build_kna_epi_long.py prefers KNA_cleantoreport/KNA_clean.xlsx under its base dir.
         shutil.copy2(clean_out, tmp_kna / "KNA_clean.xlsx")
@@ -228,6 +219,7 @@ try:
 
         clean_bytes = clean_out.read_bytes()
         long_bytes = long_out.read_bytes()
+        push_log("Generated both output workbooks")
 
     progress.progress(100, text="Done")
     push_log("Pipeline finished successfully.")
@@ -272,3 +264,8 @@ with dl2:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+
+st.subheader("Running Steps")
+if run_logs:
+    st.caption("Brief execution summary")
+    st.code("\n".join(run_logs), language="")
