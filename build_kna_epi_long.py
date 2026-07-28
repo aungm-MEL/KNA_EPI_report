@@ -1,3 +1,4 @@
+from typing import Dict, List, Tuple, Any, Optional, Union, Set
 import pandas as pd
 from pathlib import Path
 import os
@@ -969,6 +970,43 @@ def calculate_td_indicators(td_df: pd.DataFrame, indicators_df: pd.DataFrame) ->
     return indicators_df
 
 
+def _count_alod_by_sex_age(df: pd.DataFrame) -> Dict[str, int]:
+    """Count unique children_code for U1/U5 by sex in a given subset."""
+    counts = {
+        'U1_Male': 0,
+        'U1_Female': 0,
+        'U5_Male': 0,
+        'U5_Female': 0,
+    }
+    if len(df) == 0:
+        return counts
+
+    work = df.copy()
+    work['_sex_norm'] = work['Sex_'].apply(_sex_bucket)
+    work = work[work['_sex_norm'].notna() & work['age_cat'].isin(['U1', 'U5'])]
+    if len(work) == 0:
+        return counts
+
+    agg = work.groupby(['_sex_norm', 'age_cat'])['children_code'].nunique().reset_index(name='count')
+    for _, r in agg.iterrows():
+        sex = r['_sex_norm']
+        age = r['age_cat']
+        cnt = int(r['count'])
+        if sex == 'Male' and age == 'U1':
+            counts['U1_Male'] = cnt
+        elif sex == 'Female' and age == 'U1':
+            counts['U1_Female'] = cnt
+        elif sex == 'Male' and age == 'U5':
+            counts['U5_Male'] = cnt
+        elif sex == 'Female' and age == 'U5':
+            counts['U5_Female'] = cnt
+    return counts
+
+
+def _alod_total(counts: Dict[str, int]) -> int:
+    return int(counts.get('U1_Male', 0) + counts.get('U1_Female', 0) + counts.get('U5_Male', 0) + counts.get('U5_Female', 0))
+
+
 def build_td_alod_sheet(td_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.DataFrame:
     """Build Td ALOD annual sheet using template structure."""
     # Build per-year rows using the template structure. If template has multiple rows (one per year),
@@ -993,6 +1031,9 @@ def build_td_alod_sheet(td_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.Da
         ].copy()
 
         total_unique = int(alod_data['pw_code'].nunique()) if len(alod_data) else 0
+        s1_unique = int(alod_data[alod_data['quarter'].astype(str).str.startswith(('Q1', 'Q2'))]['pw_code'].nunique()) if len(alod_data) else 0
+        s2_unique = int(alod_data[alod_data['quarter'].astype(str).str.startswith(('Q3', 'Q4'))]['pw_code'].nunique()) if len(alod_data) else 0
+        upto_q3_unique = int(alod_data[alod_data['quarter'].astype(str).str.startswith(('Q1', 'Q2', 'Q3'))]['pw_code'].nunique()) if len(alod_data) else 0
 
         row = dict(base)
         # Set common keys if present
@@ -1005,12 +1046,24 @@ def build_td_alod_sheet(td_df: pd.DataFrame, template_df: pd.DataFrame) -> pd.Da
                     row[alt] = total_unique
                     break
 
+        # Extra cumulative windows requested.
+        row['Annual Total'] = total_unique
+        row['S1 Achievement'] = s1_unique
+        row['S1 Total'] = s1_unique
+        row['S2 Achievement'] = s2_unique
+        row['S2 Total'] = s2_unique
+        row['Upto Q3 Achievement'] = upto_q3_unique
+        row['Upto Q3 Total'] = upto_q3_unique
+
         # Set period/Period column if present
         period_col = 'Period' if 'Period' in row else ('period' if 'period' in row else None)
         if period_col:
             row[period_col] = year
 
-        print(f"  Td ALOD {year} annual achievement: {total_unique}")
+        print(
+            f"  Td ALOD {year}: annual={total_unique}, S1={s1_unique}, "
+            f"S2={s2_unique}, upto_Q3={upto_q3_unique}"
+        )
         rows.append(row)
 
     out_df = pd.DataFrame(rows)
@@ -1038,8 +1091,10 @@ def build_alod_cummu_sheet(child_df: pd.DataFrame, template_df: pd.DataFrame) ->
 
     child_df = child_df[child_df['receiving_pattern'].isin(['Provided by KNA', 'Young age for dose'])]
 
+    years = extract_years_from_template(template_df, fallback=['2024', '2025', '2026'])
+
     rows = []
-    for idx, year in enumerate(['2024', '2025', '2026']):
+    for idx, year in enumerate(years):
         # Use corresponding template row for each year if available
         if idx < len(template_df):
             base = template_df.iloc[idx].to_dict()
@@ -1053,28 +1108,64 @@ def build_alod_cummu_sheet(child_df: pd.DataFrame, template_df: pd.DataFrame) ->
         row.setdefault('Annaul U1 Female', 0)
         row.setdefault('Annual 1-5 Male', 0)
         row.setdefault('Annual 1-5 Female', 0)
+        row.setdefault('Annual Total', 0)
+
+        # Add S1/S2/Upto-Q3 columns mirroring annual disaggregation.
+        row.setdefault('S1 U1 Male', 0)
+        row.setdefault('S1 U1 Female', 0)
+        row.setdefault('S1 1-5 Male', 0)
+        row.setdefault('S1 1-5 Female', 0)
+        row.setdefault('S1 Total', 0)
+
+        row.setdefault('S2 U1 Male', 0)
+        row.setdefault('S2 U1 Female', 0)
+        row.setdefault('S2 1-5 Male', 0)
+        row.setdefault('S2 1-5 Female', 0)
+        row.setdefault('S2 Total', 0)
+
+        row.setdefault('Upto Q3 U1 Male', 0)
+        row.setdefault('Upto Q3 U1 Female', 0)
+        row.setdefault('Upto Q3 1-5 Male', 0)
+        row.setdefault('Upto Q3 1-5 Female', 0)
+        row.setdefault('Upto Q3 Total', 0)
 
         if len(year_data) > 0:
-            year_data['_sex_norm'] = year_data['Sex_'].apply(_sex_bucket)
-            year_data = year_data[year_data['_sex_norm'].notna()]
-            agg = year_data.groupby(['_sex_norm', 'age_cat'])['children_code'].nunique().reset_index(name='count')
-            for _, r in agg.iterrows():
-                sex = r['_sex_norm']
-                age = r['age_cat']
-                cnt = r['count']
-                if sex == 'Male':
-                    if age == 'U1':
-                        row['Annual U1 Male'] = cnt
-                    elif age == 'U5':
-                        row['Annual 1-5 Male'] = cnt
-                elif sex == 'Female':
-                    if age == 'U1':
-                        row['Annaul U1 Female'] = cnt
-                    elif age == 'U5':
-                        row['Annual 1-5 Female'] = cnt
+            annual_counts = _count_alod_by_sex_age(year_data)
+            row['Annual U1 Male'] = annual_counts['U1_Male']
+            row['Annaul U1 Female'] = annual_counts['U1_Female']
+            row['Annual 1-5 Male'] = annual_counts['U5_Male']
+            row['Annual 1-5 Female'] = annual_counts['U5_Female']
+            row['Annual Total'] = _alod_total(annual_counts)
 
-            total = agg['count'].sum()
-            print(f"  ALOD cummu {year} annual achievement: {total} (by sex/age)")
+            s1_data = year_data[year_data['quarter'].astype(str).str.startswith(('Q1', 'Q2'))].copy()
+            s1_counts = _count_alod_by_sex_age(s1_data)
+            row['S1 U1 Male'] = s1_counts['U1_Male']
+            row['S1 U1 Female'] = s1_counts['U1_Female']
+            row['S1 1-5 Male'] = s1_counts['U5_Male']
+            row['S1 1-5 Female'] = s1_counts['U5_Female']
+            row['S1 Total'] = _alod_total(s1_counts)
+
+            s2_data = year_data[year_data['quarter'].astype(str).str.startswith(('Q3', 'Q4'))].copy()
+            s2_counts = _count_alod_by_sex_age(s2_data)
+            row['S2 U1 Male'] = s2_counts['U1_Male']
+            row['S2 U1 Female'] = s2_counts['U1_Female']
+            row['S2 1-5 Male'] = s2_counts['U5_Male']
+            row['S2 1-5 Female'] = s2_counts['U5_Female']
+            row['S2 Total'] = _alod_total(s2_counts)
+
+            upto_q3_data = year_data[year_data['quarter'].astype(str).str.startswith(('Q1', 'Q2', 'Q3'))].copy()
+            upto_q3_counts = _count_alod_by_sex_age(upto_q3_data)
+            row['Upto Q3 U1 Male'] = upto_q3_counts['U1_Male']
+            row['Upto Q3 U1 Female'] = upto_q3_counts['U1_Female']
+            row['Upto Q3 1-5 Male'] = upto_q3_counts['U5_Male']
+            row['Upto Q3 1-5 Female'] = upto_q3_counts['U5_Female']
+            row['Upto Q3 Total'] = _alod_total(upto_q3_counts)
+
+            print(
+                f"  ALOD cummu {year}: annual={row['Annual Total']}, "
+                f"S1={row['S1 Total']}, S2={row['S2 Total']}, "
+                f"upto_Q3={row['Upto Q3 Total']}"
+            )
         else:
             print(f"  No {year} 'Provided by KNA' child records found for ALOD cummu")
 
@@ -1091,6 +1182,7 @@ def build_alod_cummu_sheet(child_df: pd.DataFrame, template_df: pd.DataFrame) ->
     for col in template_df.columns:
         if col in out_df.columns:
             cols_to_keep.append(col)
+    cols_to_keep += [c for c in out_df.columns if c not in cols_to_keep]
     
     out_df = out_df[cols_to_keep]
     return out_df
@@ -1285,7 +1377,6 @@ def main():
     print("Calculating indicators...")
     indicators_2025 = calculate_indicators(child_long, indicators_2025)
     indicators_2025 = calculate_td_indicators(td_long, indicators_2025)
-    indicators_2025 = indicators_2025.rename(columns={'Period': 'Year'})
     print(f"  indicators updated")
 
     print("Building Td_alod sheet...")
