@@ -1,6 +1,7 @@
 """Run clean + long KNA pipelines from one Streamlit app."""
 
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -79,20 +80,12 @@ if _script_looks_like_streamlit(clean_script):
     )
     st.stop()
 
-with st.sidebar:
-    st.header("Input Files")
-    child_upload = st.file_uploader("KNA Child vaccination.xlsx", type=["xlsx", "xlsm"], key="child")
-    td_upload = st.file_uploader("KNA Td Vaccination.xlsx", type=["xlsx", "xlsm"], key="td")
-
 st.subheader("Upload Source Files")
 col_u1, col_u2 = st.columns(2)
 with col_u1:
-    child_upload_main = st.file_uploader("Child source file", type=["xlsx", "xlsm"], key="child_main")
+    child_file = st.file_uploader("Child source file", type=["xlsx", "xlsm"], key="child_main")
 with col_u2:
-    td_upload_main = st.file_uploader("Td source file", type=["xlsx", "xlsm"], key="td_main")
-
-child_file = child_upload_main or child_upload
-td_file = td_upload_main or td_upload
+    td_file = st.file_uploader("Td source file", type=["xlsx", "xlsm"], key="td_main")
 
 if child_file is None or td_file is None:
     st.info("Please upload both source files to continue.")
@@ -104,31 +97,19 @@ if not st.button("▶ Run Full Pipeline", type="primary", use_container_width=Tr
     st.stop()
 
 progress = st.progress(0, text="Starting pipeline...")
-log_box = st.empty()
-logs = []
+run_logs = []
 
 
 def push_log(msg: str):
-    logs.append(msg)
-    log_box.code("\n".join(logs[-160:]), language="")
+    run_logs.append(msg)
 
 
 def run_step(cmd, cwd: Path, step_name: str, extra_env=None):
     push_log(f"Running: {step_name}")
-    push_log(f"  cwd={cwd}")
-    push_log(f"  cmd={' '.join(str(c) for c in cmd)}")
     env = dict(os.environ)
     if extra_env:
         env.update({k: str(v) for k, v in extra_env.items()})
-        for k, v in extra_env.items():
-            push_log(f"  env {k}={v}")
     res = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, env=env)
-    if res.stdout:
-        for line in res.stdout.splitlines():
-            push_log(f"  {line}")
-    if res.stderr:
-        for line in res.stderr.splitlines():
-            push_log(f"  [stderr] {line}")
     if res.returncode != 0:
         stderr_tail = ""
         stdout_tail = ""
@@ -143,10 +124,43 @@ def run_step(cmd, cwd: Path, step_name: str, extra_env=None):
         raise RuntimeError(
             f"{step_name} failed with exit code {res.returncode}. Details: {detail}"
         )
+    push_log(f"Completed: {step_name}")
+
+
+def show_verification_report(report: dict):
+    if not report:
+        st.warning("Verification report was not found.")
+        return
+
+    st.subheader("Verification Output")
+    summary = report.get("summary", {})
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Child Rows", int(summary.get("child_rows", 0)))
+    c2.metric("Td Rows", int(summary.get("td_rows", 0)))
+    c3.metric("Child Rows With Errors", int(summary.get("child_rows_with_any_error", 0)))
+    c4.metric("Duplicate PW Code Rows", int(summary.get("duplicate_pw_code_rows", 0)))
+
+    checks = [
+        ("duplicate_child_codes", "Duplicate Child Codes"),
+        ("duplicate_pw_codes", "Duplicate PW Codes"),
+        ("dob_later_than_fsd", "DOB Later Than FSD"),
+        ("dob_later_than_dose_date", "DOB Later Than Dose Date"),
+        ("later_dose_earlier_date", "Later Dose Earlier Date"),
+        ("later_dose_without_primary", "Later Dose Without Primary"),
+    ]
+
+    for key, title in checks:
+        rows = report.get("issues", {}).get(key, [])
+        with st.expander(f"{title} ({len(rows)})", expanded=False):
+            if rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No issues found.")
 
 
 clean_bytes = None
 long_bytes = None
+verification_report = None
 
 try:
     with tempfile.TemporaryDirectory(prefix="kna_pipeline_") as tmp_root:
@@ -156,6 +170,7 @@ try:
         tmp_clean_dir.mkdir(parents=True, exist_ok=True)
 
         progress.progress(8, text="Preparing temporary workspace...")
+        push_log("Prepared temporary workspace")
 
         shutil.copy2(long_script, tmp_kna / "build_kna_epi_long.py")
         shutil.copy2(clean_script, tmp_clean_dir / "build_kna_clean.py")
@@ -167,10 +182,12 @@ try:
         (tmp_clean_dir / "KNA Td Vaccination.xlsx").write_bytes(td_file.getvalue())
 
         clean_out = tmp_clean_dir / "KNA_clean.xlsx"
+        verify_out = tmp_clean_dir / "kna_verification_report.json"
         clean_env = {
             "KNA_CHILD_SRC": tmp_clean_dir / "KNA Child vaccination.xlsx",
             "KNA_TD_SRC": tmp_clean_dir / "KNA Td Vaccination.xlsx",
             "KNA_CLEAN_DST": clean_out,
+            "KNA_VERIFY_REPORT": verify_out,
         }
 
         progress.progress(30, text="Running build_kna_clean.py...")
@@ -178,6 +195,12 @@ try:
 
         if not clean_out.exists():
             raise FileNotFoundError("KNA_clean.xlsx was not produced")
+
+        if verify_out.exists():
+            verification_report = json.loads(verify_out.read_text(encoding="utf-8"))
+            push_log("Loaded verification report")
+        else:
+            push_log("Warning: verification report file was not produced by build_kna_clean.py")
 
         # build_kna_epi_long.py prefers KNA_cleantoreport/KNA_clean.xlsx under its base dir.
         shutil.copy2(clean_out, tmp_kna / "KNA_clean.xlsx")
@@ -196,6 +219,7 @@ try:
 
         clean_bytes = clean_out.read_bytes()
         long_bytes = long_out.read_bytes()
+        push_log("Generated both output workbooks")
 
     progress.progress(100, text="Done")
     push_log("Pipeline finished successfully.")
@@ -206,6 +230,7 @@ except Exception as exc:
     st.stop()
 
 st.success("Both outputs are ready.")
+show_verification_report(verification_report)
 
 zip_buffer = io.BytesIO()
 with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -239,3 +264,8 @@ with dl2:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+
+st.subheader("Running Steps")
+if run_logs:
+    st.caption("Brief execution summary")
+    st.code("\n".join(run_logs), language="")
