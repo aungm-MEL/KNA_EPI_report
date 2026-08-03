@@ -45,6 +45,7 @@ Quarter date boundaries
 """
 
 import os
+import json
 from pathlib import Path
 import pandas as pd
 from openpyxl.styles import PatternFill
@@ -109,6 +110,180 @@ def _max_date(*date_vals) -> pd.Timestamp:
     except (TypeError, ValueError):
       pass
   return max(dates) if dates else pd.NaT
+
+
+def _to_timestamp(value):
+  """Convert mixed Excel date representations into Timestamp; return NaT when invalid."""
+  try:
+    if pd.isna(value):
+      return pd.NaT
+    if isinstance(value, (int, float)):
+      return pd.Timestamp("1899-12-30") + pd.to_timedelta(float(value), unit="D")
+    return pd.Timestamp(value)
+  except (TypeError, ValueError):
+    return pd.NaT
+
+
+def _fmt_ts(value):
+  ts = _to_timestamp(value)
+  if pd.isna(ts):
+    return None
+  return ts.strftime("%Y-%m-%d")
+
+
+def _dose_received(row, status_col: str, date_col: str) -> bool:
+  return _status_ok(row.get(status_col)) or pd.notna(_to_timestamp(row.get(date_col)))
+
+
+def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
+  """Run requested pre-clean checks and return (error_mask, report)."""
+  max_details = 1000
+  report = {
+    "summary": {},
+    "issues": {
+      "duplicate_child_codes": [],
+      "dob_later_than_fsd": [],
+      "dob_later_than_dose_date": [],
+      "later_dose_earlier_date": [],
+      "later_dose_without_primary": [],
+    },
+  }
+
+  error_mask = pd.Series(False, index=child_df.index)
+  code_col = "children_code" if "children_code" in child_df.columns else None
+
+  # 1) Duplicate child codes.
+  duplicate_mask = pd.Series(False, index=child_df.index)
+  if code_col:
+    duplicate_mask = (
+      child_df[code_col].notna()
+      & (child_df[code_col].astype(str).str.strip() != "")
+      & child_df[code_col].duplicated(keep=False)
+    )
+    for idx in child_df.index[duplicate_mask][:max_details]:
+      report["issues"]["duplicate_child_codes"].append(
+        {
+          "row": int(idx) + 2,
+          "children_code": str(child_df.at[idx, code_col]),
+        }
+      )
+  error_mask = error_mask | duplicate_mask
+
+  # 2) DOB later than FSD.
+  dob_col = "DOB_" if "DOB_" in child_df.columns else ("DOB" if "DOB" in child_df.columns else None)
+  fsd_col = "FSD" if "FSD" in child_df.columns else None
+  dob_fsd_mask = pd.Series(False, index=child_df.index)
+  if dob_col and fsd_col:
+    dob_ts = child_df[dob_col].apply(_to_timestamp)
+    fsd_ts = child_df[fsd_col].apply(_to_timestamp)
+    dob_fsd_mask = dob_ts.notna() & fsd_ts.notna() & (dob_ts > fsd_ts)
+    for idx in child_df.index[dob_fsd_mask][:max_details]:
+      report["issues"]["dob_later_than_fsd"].append(
+        {
+          "row": int(idx) + 2,
+          "children_code": str(child_df.at[idx, code_col]) if code_col else None,
+          "DOB": _fmt_ts(child_df.at[idx, dob_col]),
+          "FSD": _fmt_ts(child_df.at[idx, fsd_col]),
+        }
+      )
+  error_mask = error_mask | dob_fsd_mask
+
+  # 3) DOB later than any dose date.
+  dose_date_cols = ["BCGD", "Pe1D", "Pe2D", "Pe3D", "OP1D", "OP2D", "OP3D", "MM1D", "MM2D"]
+  dob_dose_mask = pd.Series(False, index=child_df.index)
+  if dob_col:
+    dob_ts = child_df[dob_col].apply(_to_timestamp)
+    for idx in child_df.index:
+      dob_val = dob_ts.at[idx]
+      if pd.isna(dob_val):
+        continue
+      for dose_col in dose_date_cols:
+        if dose_col not in child_df.columns:
+          continue
+        dose_ts = _to_timestamp(child_df.at[idx, dose_col])
+        if pd.notna(dose_ts) and dob_val > dose_ts:
+          dob_dose_mask.at[idx] = True
+          if len(report["issues"]["dob_later_than_dose_date"]) < max_details:
+            report["issues"]["dob_later_than_dose_date"].append(
+              {
+                "row": int(idx) + 2,
+                "children_code": str(child_df.at[idx, code_col]) if code_col else None,
+                "DOB": dob_val.strftime("%Y-%m-%d"),
+                "dose_column": dose_col,
+                "dose_date": dose_ts.strftime("%Y-%m-%d"),
+              }
+            )
+  error_mask = error_mask | dob_dose_mask
+
+  # 4a) Later dose date earlier than previous dose date.
+  sequence_pairs = [
+    ("Pe1D", "Pe2D", "Penta2 earlier than Penta1"),
+    ("Pe2D", "Pe3D", "Penta3 earlier than Penta2"),
+    ("Pe1D", "Pe3D", "Penta3 earlier than Penta1"),
+    ("OP1D", "OP2D", "OPV2 earlier than OPV1"),
+    ("OP2D", "OP3D", "OPV3 earlier than OPV2"),
+    ("OP1D", "OP3D", "OPV3 earlier than OPV1"),
+    ("MM1D", "MM2D", "MMR2 earlier than MMR1"),
+  ]
+  sequence_mask = pd.Series(False, index=child_df.index)
+  for idx in child_df.index:
+    for first_col, later_col, issue in sequence_pairs:
+      if first_col not in child_df.columns or later_col not in child_df.columns:
+        continue
+      first_ts = _to_timestamp(child_df.at[idx, first_col])
+      later_ts = _to_timestamp(child_df.at[idx, later_col])
+      if pd.notna(first_ts) and pd.notna(later_ts) and later_ts < first_ts:
+        sequence_mask.at[idx] = True
+        if len(report["issues"]["later_dose_earlier_date"]) < max_details:
+          report["issues"]["later_dose_earlier_date"].append(
+            {
+              "row": int(idx) + 2,
+              "children_code": str(child_df.at[idx, code_col]) if code_col else None,
+              "issue": issue,
+              "first_dose_date": first_ts.strftime("%Y-%m-%d"),
+              "later_dose_date": later_ts.strftime("%Y-%m-%d"),
+            }
+          )
+  error_mask = error_mask | sequence_mask
+
+  # 4b) Primary dose not received but later dose received.
+  missing_primary_mask = pd.Series(False, index=child_df.index)
+  dependency_checks = [
+    ("PE1C", "Pe1D", "PE2C", "Pe2D", "Penta2 received without Penta1"),
+    ("PE2C", "Pe2D", "PE3C", "Pe3D", "Penta3 received without Penta2"),
+    ("OP1C", "OP1D", "OP2C", "OP2D", "OPV2 received without OPV1"),
+    ("OP2C", "OP2D", "OP3C", "OP3D", "OPV3 received without OPV2"),
+    ("MM1C", "MM1D", "MM2C", "MM2D", "MMR2 received without MMR1"),
+  ]
+  for idx in child_df.index:
+    row = child_df.loc[idx]
+    for pri_stat, pri_date, later_stat, later_date, issue in dependency_checks:
+      if not ({pri_stat, pri_date, later_stat, later_date} <= set(child_df.columns)):
+        continue
+      primary_received = _dose_received(row, pri_stat, pri_date)
+      later_received = _dose_received(row, later_stat, later_date)
+      if (not primary_received) and later_received:
+        missing_primary_mask.at[idx] = True
+        if len(report["issues"]["later_dose_without_primary"]) < max_details:
+          report["issues"]["later_dose_without_primary"].append(
+            {
+              "row": int(idx) + 2,
+              "children_code": str(child_df.at[idx, code_col]) if code_col else None,
+              "issue": issue,
+            }
+          )
+  error_mask = error_mask | missing_primary_mask
+
+  report["summary"] = {
+    "child_rows": int(len(child_df)),
+    "duplicate_child_code_rows": int(duplicate_mask.sum()),
+    "dob_later_than_fsd_rows": int(dob_fsd_mask.sum()),
+    "dob_later_than_dose_rows": int(dob_dose_mask.sum()),
+    "later_dose_earlier_date_rows": int(sequence_mask.sum()),
+    "later_dose_without_primary_rows": int(missing_primary_mask.sum()),
+    "child_rows_with_any_error": int(error_mask.sum()),
+  }
+  return error_mask, report
 
 
 def build_indicators_2025() -> "pd.DataFrame":
@@ -297,6 +472,7 @@ def _path_from_env(env_name: str, default_path: Path) -> Path:
 SRC    = _path_from_env("KNA_CHILD_SRC", BASE_DIR / "KNA Child vaccination.xlsx")
 TD_SRC = _path_from_env("KNA_TD_SRC", BASE_DIR / "KNA Td Vaccination.xlsx")
 DST    = _path_from_env("KNA_CLEAN_DST", BASE_DIR / "KNA_clean.xlsx")
+VERIFY_REPORT_PATH = _path_from_env("KNA_VERIFY_REPORT", DST.with_name("KNA_verification_report.json"))
 
 # Fallback to current working directory when no env override is provided.
 if not SRC.exists() and SRC.name == "KNA Child vaccination.xlsx":
@@ -372,6 +548,14 @@ else:
   )
   print(f"{td_code_col} duplicates: {int(td_dup_mask.sum())}")
 
+td_dup_rows = []
+if td_code_col is not None:
+  for idx in td_df.index[td_dup_mask][:1000]:
+    td_dup_rows.append({
+      "row": int(idx) + 2,
+      "pw_code": str(td_df.at[idx, td_code_col]),
+    })
+
 # ── Validate required columns ──────────────────────────────────────────────────
 required = [
   "Reg_", "Site", "FSDA", "M1A",
@@ -409,6 +593,26 @@ dup_mask = (
   & df["children_code"].duplicated(keep=False)
 )
 print(f"children_code duplicates: {int(dup_mask.sum())}")
+
+# ── Pre-clean verification ────────────────────────────────────────────────────
+print("\nRunning verification checks before cleaning...")
+child_error_mask, verification_report = run_child_verification(df)
+verification_report["summary"]["td_rows"] = int(len(td_df))
+verification_report["summary"]["duplicate_pw_code_rows"] = int(td_dup_mask.sum())
+verification_report["issues"]["duplicate_pw_codes"] = td_dup_rows
+verification_report["summary"]["total_issue_rows"] = (
+  int(verification_report["summary"]["child_rows_with_any_error"])
+  + int(verification_report["summary"]["duplicate_pw_code_rows"])
+)
+
+print("Verification summary:")
+for k, v in verification_report["summary"].items():
+  print(f"  {k}: {v}")
+
+VERIFY_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+with open(VERIFY_REPORT_PATH, "w", encoding="utf-8") as f:
+  json.dump(verification_report, f, indent=2, ensure_ascii=False)
+print(f"Verification report saved: {VERIFY_REPORT_PATH}")
 
 # -- Add Full Dose columns for 2025 and 2026 quarters only ---------------------
 for col_name, q_start, q_end in QUARTERS:
@@ -614,12 +818,14 @@ with pd.ExcelWriter(DST, engine="openpyxl") as writer:
   idp_df.to_excel(writer, sheet_name="IDP", index=False)
   td2_df.to_excel(writer, sheet_name="Td2_indicator", index=False)
 
-  # Highlight duplicate children_code values in yellow on the Child sheet.
+  # Highlight children_code rows with any verification error on the Child sheet.
   child_ws = writer.book["Child"]
   yellow_fill = PatternFill(fill_type="solid", fgColor="FFFF00")
+  red_fill = PatternFill(fill_type="solid", fgColor="FFC7CE")
   cc_col_idx = df.columns.get_loc("children_code") + 1  # openpyxl is 1-based
-  for row_idx in df.index[dup_mask]:
-      child_ws.cell(row=int(row_idx) + 2, column=cc_col_idx).fill = yellow_fill
+
+  for row_idx in df.index[child_error_mask]:
+      child_ws.cell(row=int(row_idx) + 2, column=cc_col_idx).fill = red_fill
 
   # Highlight duplicate pw_code/PW_code values in yellow on the Td sheet.
   if td_code_col is not None:
