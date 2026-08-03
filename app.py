@@ -8,6 +8,7 @@ import sys
 import tempfile
 import io
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -161,8 +162,16 @@ def show_verification_report(report: dict):
 clean_bytes = None
 long_bytes = None
 verification_report = None
+clean_download_name = None
+long_download_name = None
+zip_download_name = None
 
 try:
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    clean_download_name = f"KNA_clean_{run_timestamp}.xlsx"
+    long_download_name = f"KNA_EPI_long_{run_timestamp}.xlsx"
+    zip_download_name = f"KNA_pipeline_outputs_{run_timestamp}.zip"
+
     with tempfile.TemporaryDirectory(prefix="kna_pipeline_") as tmp_root:
         tmp_root = Path(tmp_root)
         tmp_kna = tmp_root / "KNA"
@@ -181,7 +190,7 @@ try:
         (tmp_clean_dir / "KNA Child vaccination.xlsx").write_bytes(child_file.getvalue())
         (tmp_clean_dir / "KNA Td Vaccination.xlsx").write_bytes(td_file.getvalue())
 
-        clean_out = tmp_clean_dir / "KNA_clean.xlsx"
+        clean_out = tmp_clean_dir / clean_download_name
         verify_out = tmp_clean_dir / "kna_verification_report.json"
         clean_env = {
             "KNA_CHILD_SRC": tmp_clean_dir / "KNA Child vaccination.xlsx",
@@ -205,7 +214,7 @@ try:
         # build_kna_epi_long.py prefers KNA_cleantoreport/KNA_clean.xlsx under its base dir.
         shutil.copy2(clean_out, tmp_kna / "KNA_clean.xlsx")
 
-        long_out = tmp_kna / "KNA_EPI_long.xlsx"
+        long_out = tmp_kna / long_download_name
         long_env = {
             "KNA_LONG_INPUT": clean_out,
             "KNA_LONG_OUTPUT": long_out,
@@ -234,14 +243,14 @@ show_verification_report(verification_report)
 
 zip_buffer = io.BytesIO()
 with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-    zip_file.writestr("KNA_clean.xlsx", clean_bytes)
-    zip_file.writestr("KNA_EPI_long.xlsx", long_bytes)
+    zip_file.writestr(clean_download_name, clean_bytes)
+    zip_file.writestr(long_download_name, long_bytes)
 zip_buffer.seek(0)
 
 st.download_button(
     label="Download Both Files (.zip)",
     data=zip_buffer.getvalue(),
-    file_name="KNA_pipeline_outputs.zip",
+    file_name=zip_download_name,
     mime="application/zip",
     use_container_width=True,
     type="primary",
@@ -252,7 +261,7 @@ with dl1:
     st.download_button(
         label="Download KNA_clean.xlsx",
         data=clean_bytes,
-        file_name="KNA_clean.xlsx",
+        file_name=clean_download_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
@@ -260,7 +269,7 @@ with dl2:
     st.download_button(
         label="Download KNA_EPI_long.xlsx",
         data=long_bytes,
-        file_name="KNA_EPI_long.xlsx",
+        file_name=long_download_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
