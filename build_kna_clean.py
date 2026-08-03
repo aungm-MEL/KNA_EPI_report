@@ -131,12 +131,127 @@ def _fmt_ts(value):
   return ts.strftime("%Y-%m-%d")
 
 
+def _datedif_months(dob_val, fsd_val):
+  """Replicate Excel DATEDIF(...,"M") completed-month behavior."""
+  dob_ts = _to_timestamp(dob_val)
+  fsd_ts = _to_timestamp(fsd_val)
+  if pd.isna(dob_ts) or pd.isna(fsd_ts):
+    return pd.NA
+  if fsd_ts < dob_ts:
+    return pd.NA
+
+  months = (fsd_ts.year - dob_ts.year) * 12 + (fsd_ts.month - dob_ts.month)
+  if fsd_ts.day < dob_ts.day:
+    months -= 1
+  return months
+
+
+def _derive_fsd_fsda(df: pd.DataFrame) -> pd.DataFrame:
+  """Ensure FSD/FSDA exist. FSD=min dose date; FSDA=DATEDIF months between DOB and FSD."""
+  out = df.copy()
+
+  dose_cols = [
+    "BCGD", "Pe1D", "Pe2D", "Pe3D", "OP1D", "OP2D", "OP3D", "MM1D", "MM2D",
+    "JaED", "IP1D",
+  ]
+  available_dose_cols = [c for c in dose_cols if c in out.columns]
+
+  fsd_missing_or_blank = ("FSD" not in out.columns)
+  if not fsd_missing_or_blank:
+    fsd_missing_or_blank = out["FSD"].isna().all() or (out["FSD"].astype(str).str.strip() == "").all()
+
+  if fsd_missing_or_blank:
+    if not available_dose_cols:
+      raise ValueError(
+        "Cannot derive FSD: no dose date columns were found in the child source file."
+      )
+    print(f"Deriving FSD from earliest dose date across: {available_dose_cols}")
+    dose_ts = out[available_dose_cols].apply(lambda col: col.map(_to_timestamp))
+    out["FSD"] = dose_ts.min(axis=1, skipna=True)
+
+  fsda_missing_or_blank = ("FSDA" not in out.columns)
+  if not fsda_missing_or_blank:
+    fsda_missing_or_blank = out["FSDA"].isna().all() or (out["FSDA"].astype(str).str.strip() == "").all()
+
+  if fsda_missing_or_blank:
+    dob_col = "DOB_" if "DOB_" in out.columns else ("DOB" if "DOB" in out.columns else None)
+    if not dob_col:
+      raise ValueError(
+        "Cannot derive FSDA: neither DOB_ nor DOB exists in the child source file."
+      )
+    print(f"Deriving FSDA as completed months between {dob_col} and FSD")
+    out["FSDA"] = out.apply(lambda r: _datedif_months(r.get(dob_col), r.get("FSD")), axis=1)
+
+  return out
+
+
+def _derive_dose_age_columns(df: pd.DataFrame) -> pd.DataFrame:
+  """Derive dose-age columns using Excel-equivalent IF/ISBLANK/DATEDIF logic."""
+  out = df.copy()
+  dob_col = "DOB_" if "DOB_" in out.columns else ("DOB" if "DOB" in out.columns else None)
+  if not dob_col:
+    raise ValueError(
+      "Cannot derive dose-age columns: neither DOB_ nor DOB exists in the child source file."
+    )
+
+  age_specs = {
+    "BCA": ("BCGD", "BC_C"),
+    "Pe1A": ("Pe1D", "PE1C"),
+    "Pe2A": ("Pe2D", "PE2C"),
+    "Pe3A": ("Pe3D", "PE3C"),
+    "OP1A": ("OP1D", "OP1C"),
+    "OP2A": ("OP2D", "OP2C"),
+    "OP3A": ("OP3D", "OP3C"),
+    "IPA": ("IP1D", "IP1C"),
+    "M1A": ("MM1D", "MM1C"),
+    "M2A": ("MM2D", "MM2C"),
+    "JeA": ("JaED", "JaEC"),
+  }
+
+  def _status_num(val):
+    try:
+      if isinstance(val, str):
+        val = val.strip()
+      if pd.isna(val) or val == "":
+        return None
+      return int(float(val))
+    except (TypeError, ValueError):
+      return None
+
+  def _calc_age_cell(row, date_col: str, code_col: str):
+    dose_dt = _to_timestamp(row.get(date_col))
+    code_num = _status_num(row.get(code_col))
+
+    # IF(ISBLANK(date), IF(code=1,111, IF(code in {0,3,4},999,"")), DATEDIF(DOB,date,"M"))
+    if pd.isna(dose_dt):
+      if code_num == 1:
+        return 111
+      if code_num in {0, 3, 4}:
+        return 999
+      return pd.NA
+
+    return _datedif_months(row.get(dob_col), dose_dt)
+
+  for age_col, (date_col, code_col) in age_specs.items():
+    if date_col not in out.columns or code_col not in out.columns:
+      continue
+
+    if age_col not in out.columns:
+      out[age_col] = pd.NA
+
+    calc_vals = out.apply(lambda r, d=date_col, c=code_col: _calc_age_cell(r, d, c), axis=1)
+    empty_existing = out[age_col].isna() | (out[age_col].astype(str).str.strip() == "")
+    out.loc[empty_existing, age_col] = calc_vals.loc[empty_existing]
+
+  return out
+
+
 def _dose_received(row, status_col: str, date_col: str) -> bool:
   return _status_ok(row.get(status_col)) or pd.notna(_to_timestamp(row.get(date_col)))
 
 
-def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
-  """Run requested pre-clean checks and return (error_mask, report)."""
+def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict, pd.Series]:
+  """Run requested pre-clean checks and return (error_mask, report, verification_status)."""
   max_details = 1000
   report = {
     "summary": {},
@@ -150,6 +265,7 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
   }
 
   error_mask = pd.Series(False, index=child_df.index)
+  issue_labels = {idx: [] for idx in child_df.index}
   code_col = "children_code" if "children_code" in child_df.columns else None
 
   # 1) Duplicate child codes.
@@ -168,6 +284,8 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
         }
       )
   error_mask = error_mask | duplicate_mask
+  for idx in child_df.index[duplicate_mask]:
+    issue_labels[idx].append("Duplicate child code")
 
   # 2) DOB later than FSD.
   dob_col = "DOB_" if "DOB_" in child_df.columns else ("DOB" if "DOB" in child_df.columns else None)
@@ -187,6 +305,8 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
         }
       )
   error_mask = error_mask | dob_fsd_mask
+  for idx in child_df.index[dob_fsd_mask]:
+    issue_labels[idx].append("DOB later than FSD")
 
   # 3) DOB later than any dose date.
   dose_date_cols = ["BCGD", "Pe1D", "Pe2D", "Pe3D", "OP1D", "OP2D", "OP3D", "MM1D", "MM2D"]
@@ -214,6 +334,8 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
               }
             )
   error_mask = error_mask | dob_dose_mask
+  for idx in child_df.index[dob_dose_mask]:
+    issue_labels[idx].append("DOB later than dose date")
 
   # 4a) Later dose date earlier than previous dose date.
   sequence_pairs = [
@@ -245,6 +367,8 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
             }
           )
   error_mask = error_mask | sequence_mask
+  for idx in child_df.index[sequence_mask]:
+    issue_labels[idx].append("Later dose earlier than previous dose")
 
   # 4b) Primary dose not received but later dose received.
   missing_primary_mask = pd.Series(False, index=child_df.index)
@@ -273,6 +397,8 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
             }
           )
   error_mask = error_mask | missing_primary_mask
+  for idx in child_df.index[missing_primary_mask]:
+    issue_labels[idx].append("Later dose received without primary dose")
 
   report["summary"] = {
     "child_rows": int(len(child_df)),
@@ -283,7 +409,13 @@ def run_child_verification(child_df: pd.DataFrame) -> tuple[pd.Series, dict]:
     "later_dose_without_primary_rows": int(missing_primary_mask.sum()),
     "child_rows_with_any_error": int(error_mask.sum()),
   }
-  return error_mask, report
+  verification_status = pd.Series("OK", index=child_df.index, dtype="object")
+  for idx, labels in issue_labels.items():
+    if labels:
+      # Keep unique labels while preserving check order.
+      verification_status.at[idx] = " | ".join(list(dict.fromkeys(labels)))
+
+  return error_mask, report, verification_status
 
 
 def build_indicators_2025() -> "pd.DataFrame":
@@ -498,6 +630,9 @@ df = pd.read_excel(SRC, engine="openpyxl")
 print(f"  Rows   : {len(df)}")
 print(f"  Columns: {len(df.columns)}")
 
+df = _derive_fsd_fsda(df)
+df = _derive_dose_age_columns(df)
+
 print(f"Reading  : {TD_SRC} [AN Td]")
 td_df = pd.read_excel(TD_SRC, sheet_name="AN Td", engine="openpyxl")
 print(f"  Td rows   : {len(td_df)}")
@@ -596,7 +731,7 @@ print(f"children_code duplicates: {int(dup_mask.sum())}")
 
 # ── Pre-clean verification ────────────────────────────────────────────────────
 print("\nRunning verification checks before cleaning...")
-child_error_mask, verification_report = run_child_verification(df)
+child_error_mask, verification_report, child_verification_status = run_child_verification(df)
 verification_report["summary"]["td_rows"] = int(len(td_df))
 verification_report["summary"]["duplicate_pw_code_rows"] = int(td_dup_mask.sum())
 verification_report["issues"]["duplicate_pw_codes"] = td_dup_rows
@@ -604,6 +739,13 @@ verification_report["summary"]["total_issue_rows"] = (
   int(verification_report["summary"]["child_rows_with_any_error"])
   + int(verification_report["summary"]["duplicate_pw_code_rows"])
 )
+
+df["verification_status"] = child_verification_status
+
+td_verification_status = pd.Series("OK", index=td_df.index, dtype="object")
+for idx in td_df.index[td_dup_mask]:
+  td_verification_status.at[idx] = "Duplicate pw_code"
+td_df["verification_status"] = td_verification_status
 
 print("Verification summary:")
 for k, v in verification_report["summary"].items():
