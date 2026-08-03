@@ -1,0 +1,244 @@
+{
+  "summary": {
+    "child_rows": 14095,
+    "duplicate_child_code_rows": 16,
+    "dob_later_than_fsd_rows": 0,
+    "dob_later_than_dose_rows": 0,
+    "later_dose_earlier_date_rows": 10,
+    "later_dose_without_primary_rows": 5,
+    "child_rows_with_any_error": 31,
+    "td_rows": 6517,
+    "duplicate_pw_code_rows": 6,
+    "total_issue_rows": 37
+  },
+  "issues": {
+    "duplicate_child_codes": [
+      {
+        "row": 14,
+        "children_code": "40_Hsaw Yay"
+      },
+      {
+        "row": 15,
+        "children_code": "40_Hsaw Yay"
+      },
+      {
+        "row": 16,
+        "children_code": "19_Let Pan Kwin"
+      },
+      {
+        "row": 17,
+        "children_code": "19_Let Pan Kwin"
+      },
+      {
+        "row": 18,
+        "children_code": "91_Loi Yin"
+      },
+      {
+        "row": 19,
+        "children_code": "91_Loi Yin"
+      },
+      {
+        "row": 20,
+        "children_code": "1084_Lwal Waing"
+      },
+      {
+        "row": 21,
+        "children_code": "1084_Lwal Waing"
+      },
+      {
+        "row": 22,
+        "children_code": "1396_Lwal Waing"
+      },
+      {
+        "row": 23,
+        "children_code": "1396_Lwal Waing"
+      },
+      {
+        "row": 24,
+        "children_code": "1472_Lwal Waing"
+      },
+      {
+        "row": 25,
+        "children_code": "1472_Lwal Waing"
+      },
+      {
+        "row": 26,
+        "children_code": "1479_Lwal Waing"
+      },
+      {
+        "row": 27,
+        "children_code": "1479_Lwal Waing"
+      },
+      {
+        "row": 28,
+        "children_code": "84_Taung Chay"
+      },
+      {
+        "row": 29,
+        "children_code": "84_Taung Chay"
+      }
+    ],
+    "dob_later_than_fsd": [],
+    "dob_later_than_dose_date": [],
+    "later_dose_earlier_date": [
+      {
+        "row": 3953,
+        "children_code": "323_Loi Nan Pha",
+        "issue": "OPV2 earlier than OPV1",
+        "first_dose_date": "2024-10-04",
+        "later_dose_date": "2024-07-04"
+      },
+      {
+        "row": 3953,
+        "children_code": "323_Loi Nan Pha",
+        "issue": "OPV3 earlier than OPV1",
+        "first_dose_date": "2024-10-04",
+        "later_dose_date": "2024-08-04"
+      },
+      {
+        "row": 3954,
+        "children_code": "324_Loi Nan Pha",
+        "issue": "OPV2 earlier than OPV1",
+        "first_dose_date": "2024-10-04",
+        "later_dose_date": "2024-07-04"
+      },
+      {
+        "row": 3954,
+        "children_code": "324_Loi Nan Pha",
+        "issue": "OPV3 earlier than OPV1",
+        "first_dose_date": "2024-10-04",
+        "later_dose_date": "2024-08-04"
+      },
+      {
+        "row": 4049,
+        "children_code": "419_Loi Nan Pha",
+        "issue": "Penta2 earlier than Penta1",
+        "first_dose_date": "2024-12-04",
+        "later_dose_date": "2024-10-04"
+      },
+      {
+        "row": 4049,
+        "children_code": "419_Loi Nan Pha",
+        "issue": "OPV2 earlier than OPV1",
+        "first_dose_date": "2024-12-04",
+        "later_dose_date": "2024-10-04"
+      },
+      {
+        "row": 7251,
+        "children_code": "598_Hoya",
+        "issue": "MMR2 earlier than MMR1",
+        "first_dose_date": "2024-06-04",
+        "later_dose_date": "2024-05-05"
+      },
+      {
+        "row": 9968,
+        "children_code": "436_Lwal Waing",
+        "issue": "OPV3 earlier than OPV2",
+        "first_dose_date": "2025-09-05",
+        "later_dose_date": "2024-09-05"
+      },
+      {
+        "row": 10009,
+        "children_code": "477_Lwal Waing",
+        "issue": "Penta2 earlier than Penta1",
+        "first_dose_date": "2024-07-05",
+        "later_dose_date": "2024-05-05"
+      },
+      {
+        "row": 11027,
+        "children_code": "21_Taung Chay",
+        "issue": "OPV2 earlier than OPV1",
+        "first_dose_date": "2025-10-05",
+        "later_dose_date": "2025-08-18"
+      },
+      {
+        "row": 11660,
+        "children_code": "497_Hpar Hlaing",
+        "issue": "Penta3 earlier than Penta2",
+        "first_dose_date": "2024-12-06",
+        "later_dose_date": "2024-09-06"
+      },
+      {
+        "row": 11660,
+        "children_code": "497_Hpar Hlaing",
+        "issue": "OPV3 earlier than OPV2",
+        "first_dose_date": "2024-12-06",
+        "later_dose_date": "2024-09-06"
+      },
+      {
+        "row": 12407,
+        "children_code": "1246_Hpar Hlaing",
+        "issue": "Penta3 earlier than Penta1",
+        "first_dose_date": "2025-09-05",
+        "later_dose_date": "2025-08-09"
+      },
+      {
+        "row": 12407,
+        "children_code": "1246_Hpar Hlaing",
+        "issue": "OPV3 earlier than OPV1",
+        "first_dose_date": "2025-09-05",
+        "later_dose_date": "2025-08-09"
+      },
+      {
+        "row": 13906,
+        "children_code": "1385_Naung Hlaing",
+        "issue": "OPV3 earlier than OPV2",
+        "first_dose_date": "2025-11-05",
+        "later_dose_date": "2025-08-05"
+      }
+    ],
+    "later_dose_without_primary": [
+      {
+        "row": 10491,
+        "children_code": "960_Lwal Waing",
+        "issue": "OPV3 received without OPV2"
+      },
+      {
+        "row": 10505,
+        "children_code": "974_Lwal Waing",
+        "issue": "MMR2 received without MMR1"
+      },
+      {
+        "row": 11029,
+        "children_code": "23_Taung Chay",
+        "issue": "OPV2 received without OPV1"
+      },
+      {
+        "row": 12133,
+        "children_code": "970_Hpar Hlaing",
+        "issue": "OPV3 received without OPV2"
+      },
+      {
+        "row": 13910,
+        "children_code": "1389_Naung Hlaing",
+        "issue": "OPV3 received without OPV2"
+      }
+    ],
+    "duplicate_pw_codes": [
+      {
+        "row": 4304,
+        "pw_code": "573_Loi Wyine"
+      },
+      {
+        "row": 4305,
+        "pw_code": "573_Loi Wyine"
+      },
+      {
+        "row": 5735,
+        "pw_code": "69_Taung Chay"
+      },
+      {
+        "row": 5736,
+        "pw_code": "69_Taung Chay"
+      },
+      {
+        "row": 6477,
+        "pw_code": "584_Yu Sa Mo So"
+      },
+      {
+        "row": 6478,
+        "pw_code": "584_Yu Sa Mo So"
+      }
+    ]
+  }
+}
