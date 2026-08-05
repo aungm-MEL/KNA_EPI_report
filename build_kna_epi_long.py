@@ -136,6 +136,16 @@ def _sex_bucket(val):
     return None
 
 
+def normalize_township_name(val):
+    """Normalize township names used in Twp/Twp_MIMU outputs."""
+    if pd.isna(val):
+        return val
+    text = str(val).strip()
+    if text.lower() == 'mobyae':
+        return 'Pekon'
+    return text
+
+
 def get_completion_status(row):
     # Priority order requested: completion_status_2024, then 2025 columns, then 2026 columns.
 
@@ -215,6 +225,9 @@ def build_child_long(df_child: pd.DataFrame) -> pd.DataFrame:
         raise SystemExit('No child frames created')
     long_df = pd.concat(frames, ignore_index=True)
 
+    if 'Twp' in long_df.columns:
+        long_df['Twp'] = long_df['Twp'].apply(normalize_township_name)
+
     long_df['receiving_pattern'] = long_df['receiving_pattern'].apply(map_pattern)
 
     # filters
@@ -268,6 +281,10 @@ def build_td_long(df_td: pd.DataFrame) -> pd.DataFrame:
     if not frames:
         raise SystemExit('No Td frames created')
     long_df = pd.concat(frames, ignore_index=True)
+
+    if 'Twp' in long_df.columns:
+        long_df['Twp'] = long_df['Twp'].apply(normalize_township_name)
+
     long_df['receiving_pattern'] = long_df['receiving_pattern'].apply(map_pattern)
     long_df = long_df[long_df['receiving_pattern'].notna() & (long_df['receiving_pattern'] != '')]
     if 'period' in long_df.columns and 'FSD' in long_df.columns:
