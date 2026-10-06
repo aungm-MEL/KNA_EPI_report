@@ -147,6 +147,7 @@ def show_verification_report(report: dict):
         ("dob_later_than_fsd", "DOB Later Than FSD"),
         ("dob_later_than_dose_date", "DOB Later Than Dose Date"),
         ("later_dose_earlier_date", "Later Dose Earlier Date"),
+        ("dose_interval_under_28_days", "Dose Interval Under 28 Days"),
         ("later_dose_without_primary", "Later Dose Without Primary"),
     ]
 
