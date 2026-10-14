@@ -1,4 +1,4 @@
-﻿"""Run clean + long KNA pipelines from one Streamlit app."""
+"""Run clean + long KNA pipelines from one Streamlit app."""
 
 import os
 import json
@@ -13,8 +13,8 @@ from pathlib import Path
 import streamlit as st
 
 
-st.set_page_config(page_title="KNA EPI Pipeline", page_icon="ðŸ’‰", layout="wide")
-st.title("ðŸ’‰ KNA EPI Pipeline")
+st.set_page_config(page_title="KNA EPI Verification and Report", layout="wide")
+st.title("KNA EPI Verification and Report")
 st.caption(
     "Upload source child and Td workbooks, run build_kna_clean.py and build_kna_epi_long.py, "
     "then download both outputs."
@@ -63,9 +63,9 @@ if not clean_script.exists() or not long_script.exists():
         "Make sure Streamlit Cloud **Main file path** is set to `KNA/app.py`.\n\n"
         f"- `app.py` is at: `{Path(__file__).resolve()}`\n"
         f"- Clean script search paths:\n{clean_locations}\n"
-        f"- Selected clean script: `{clean_script}` â€” **{'FOUND' if clean_script.exists() else 'MISSING'}**\n"
+        f"- Selected clean script: `{clean_script}` — **{'FOUND' if clean_script.exists() else 'MISSING'}**\n"
         f"- Long script search paths:\n{long_locations}\n"
-        f"- Selected long script: `{long_script}` â€” **{'FOUND' if long_script.exists() else 'MISSING'}**"
+        f"- Selected long script: `{long_script}` — **{'FOUND' if long_script.exists() else 'MISSING'}**"
     )
     st.stop()
 
@@ -93,7 +93,7 @@ if child_file is None or td_file is None:
 
 st.success(f"Child: {child_file.name} | Td: {td_file.name}")
 
-run_clicked = st.button("â–¶ Run Full Pipeline", type="primary", use_container_width=True)
+run_clicked = st.button("Run Full Pipeline", type="primary", use_container_width=True)
 
 # Download buttons trigger a rerun, so results are kept in session_state and re-rendered.
 if not run_clicked and "kna_results" not in st.session_state:
