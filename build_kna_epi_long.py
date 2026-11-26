@@ -1357,6 +1357,50 @@ def build_idp_sheet(child_long_df: pd.DataFrame, template_df: pd.DataFrame) -> p
     return out_df
 
 
+def build_idp_annual_sheet(idp_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build IDP_annual sheet by aggregating quarterly data into annual totals.
+    
+    Args:
+        idp_df: The IDP sheet dataframe with quarterly columns (Q1-Q4)
+    
+    Returns:
+        DataFrame with annual aggregated data
+    """
+    print("Building IDP_annual sheet...")
+    
+    # Create a copy for annual data
+    df_annual = idp_df[['Period', 'Organization', 'Project Name', 'indicator']].copy()
+    
+    # Sum quarterly columns for each category
+    # Match exact patterns: "Q# IDP Male" (space + IDP + space + Male)
+    # IDP Male: Q1 + Q2 + Q3 + Q4
+    q_idp_male_cols = [col for col in idp_df.columns if col.startswith('Q') and ' IDP Male' in col and 'non-' not in col]
+    df_annual['IDP Male'] = idp_df[q_idp_male_cols].sum(axis=1, skipna=True) if q_idp_male_cols else 0
+    
+    # IDP Female: Q1 + Q2 + Q3 + Q4
+    q_idp_female_cols = [col for col in idp_df.columns if col.startswith('Q') and ' IDP Female' in col and 'non-' not in col]
+    df_annual['IDP Female'] = idp_df[q_idp_female_cols].sum(axis=1, skipna=True) if q_idp_female_cols else 0
+    
+    # non-IDP Male: Q1 + Q2 + Q3 + Q4
+    q_non_idp_male_cols = [col for col in idp_df.columns if col.startswith('Q') and 'non-IDP Male' in col]
+    df_annual['non-IDP Male'] = idp_df[q_non_idp_male_cols].sum(axis=1, skipna=True) if q_non_idp_male_cols else 0
+    
+    # non-IDP Female: Q1 + Q2 + Q3 + Q4
+    q_non_idp_female_cols = [col for col in idp_df.columns if col.startswith('Q') and 'non-IDP Female' in col]
+    df_annual['non-IDP Female'] = idp_df[q_non_idp_female_cols].sum(axis=1, skipna=True) if q_non_idp_female_cols else 0
+    
+    # Convert zeros to NaN to match the original data pattern
+    df_annual = df_annual.where(df_annual != 0, None)
+    
+    # Convert numeric columns to int where appropriate
+    for col in ['IDP Male', 'IDP Female', 'non-IDP Male', 'non-IDP Female']:
+        df_annual[col] = df_annual[col].apply(lambda x: int(x) if pd.notna(x) and x == int(x) else x)
+    
+    print(f"  IDP_annual: {len(df_annual)} rows")
+    return df_annual
+
+
 def main():
     print(f"Reading {input_path} ...")
     child_raw = pd.read_excel(input_path, sheet_name='Child')
@@ -1408,6 +1452,10 @@ def main():
     idp_df = build_idp_sheet(child_long, idp_template)
     print(f"  IDP: {len(idp_df)} rows")
 
+    print("Building IDP_annual sheet...")
+    idp_annual_df = build_idp_annual_sheet(idp_df)
+    print(f"  IDP_annual: {len(idp_annual_df)} rows")
+
     print("Building Td2_indicator sheet...")
     td2_df = build_td2_indicator_sheet(td_long, td2_template)
     print(f"  Td2_indicator: {len(td2_df)} rows")
@@ -1453,6 +1501,11 @@ def main():
             print("Writing IDP sheet...")
             idp_df.to_excel(writer, sheet_name='IDP', index=False)
             print("  done")
+
+            print("Writing IDP_annual sheet...")
+            idp_annual_df.to_excel(writer, sheet_name='IDP_annual', index=False)
+            print("  done")
+
             print("Writing Td2_indicator sheet...")
             td2_df.to_excel(writer, sheet_name='Td2_indicator', index=False)
             print("  done")
